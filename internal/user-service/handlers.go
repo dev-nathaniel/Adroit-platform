@@ -1,1 +1,174 @@
 package userservice
+
+import (
+	"encoding/json"
+	"net/http"
+
+	"github.com/go-chi/chi/v5"
+
+	"github.com/dev-nathaniel/Adroit-platform/pkg/middleware"
+	"github.com/dev-nathaniel/Adroit-platform/pkg/response"
+)
+
+// Handler handles HTTP requests for user and organization endpoints
+type Handler struct {
+	service *Service
+}
+
+// NewHandler creates a new user HTTP handler
+func NewHandler(service *Service) *Handler {
+	return &Handler{service: service}
+}
+
+// RegisterRoutes registers endpoints onto a Chi router
+func (h *Handler) RegisterRoutes(r chi.Router, jwtSecret string) {
+	r.Use(middleware.RequireAuth(jwtSecret))
+
+	// User Profile
+	r.Get("/profile", h.HandleGetProfile)
+	r.Patch("/profile", h.HandleUpdateProfile)
+
+	// Organizations
+	r.Get("/organizations", h.HandleListOrganizations)
+	r.Post("/organizations", h.HandleCreateOrganization)
+	r.Get("/organizations/{orgID}", h.HandleGetOrganization)
+	r.Post("/organizations/{orgID}/members", h.HandleAddMember)
+	r.Get("/organizations/{orgID}/members", h.HandleListMembers)
+}
+
+// HandleGetProfile returns the caller's profile
+func (h *Handler) HandleGetProfile(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r.Context())
+	profile, err := h.service.GetProfile(r.Context(), userID)
+	if err != nil {
+		if err == ErrNotFound {
+			response.NotFound(w, "User profile not found")
+			return
+		}
+		response.InternalServerError(w, "Failed to retrieve profile")
+		return
+	}
+	response.JSON(w, http.StatusOK, profile)
+}
+
+// HandleUpdateProfile updates caller profile
+func (h *Handler) HandleUpdateProfile(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r.Context())
+	var req UpdateProfileRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.BadRequest(w, "Invalid request body", nil)
+		return
+	}
+
+	updated, err := h.service.UpdateProfile(r.Context(), userID, req)
+	if err != nil {
+		response.InternalServerError(w, "Failed to update profile")
+		return
+	}
+	response.JSON(w, http.StatusOK, updated)
+}
+
+// HandleListOrganizations lists all workspaces for the caller
+func (h *Handler) HandleListOrganizations(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r.Context())
+	orgs, err := h.service.ListOrganizations(r.Context(), userID)
+	if err != nil {
+		response.InternalServerError(w, "Failed to list organizations")
+		return
+	}
+	response.JSON(w, http.StatusOK, orgs)
+}
+
+// HandleCreateOrganization creates a new workspace
+func (h *Handler) HandleCreateOrganization(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r.Context())
+	var req CreateOrgRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.BadRequest(w, "Invalid request body", nil)
+		return
+	}
+
+	org, err := h.service.CreateOrganization(r.Context(), userID, req)
+	if err != nil {
+		if err == ErrOrgNameRequired {
+			response.BadRequest(w, err.Error(), nil)
+			return
+		}
+		response.InternalServerError(w, "Failed to create organization")
+		return
+	}
+	response.JSON(w, http.StatusCreated, org)
+}
+
+// HandleGetOrganization retrieves single organization details
+func (h *Handler) HandleGetOrganization(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r.Context())
+	orgID := chi.URLParam(r, "orgID")
+
+	org, role, err := h.service.GetOrganization(r.Context(), userID, orgID)
+	if err != nil {
+		if err == ErrUnauthorized {
+			response.Forbidden(w, "You are not a member of this organization")
+			return
+		}
+		if err == ErrNotFound {
+			response.NotFound(w, "Organization not found")
+			return
+		}
+		response.InternalServerError(w, "Failed to get organization")
+		return
+	}
+
+	response.JSON(w, http.StatusOK, map[string]any{
+		"organization": org,
+		"role":         role,
+	})
+}
+
+// HandleAddMember adds a teammate to the workspace
+func (h *Handler) HandleAddMember(w http.ResponseWriter, r *http.Request) {
+	callerID := middleware.GetUserID(r.Context())
+	orgID := chi.URLParam(r, "orgID")
+
+	var req AddMemberRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.BadRequest(w, "Invalid request body", nil)
+		return
+	}
+
+	if err := h.service.AddMember(r.Context(), callerID, orgID, req); err != nil {
+		switch err {
+		case ErrPermissionDenied:
+			response.Forbidden(w, err.Error())
+		case ErrInvalidRole:
+			response.BadRequest(w, err.Error(), nil)
+		case ErrAlreadyMember:
+			response.Conflict(w, err.Error(), nil)
+		default:
+			response.InternalServerError(w, err.Error())
+		}
+		return
+	}
+
+	response.JSON(w, http.StatusCreated, map[string]string{
+		"status":  "success",
+		"message": "Member added to organization successfully",
+	})
+}
+
+// HandleListMembers lists all members of the workspace
+func (h *Handler) HandleListMembers(w http.ResponseWriter, r *http.Request) {
+	callerID := middleware.GetUserID(r.Context())
+	orgID := chi.URLParam(r, "orgID")
+
+	members, err := h.service.ListMembers(r.Context(), callerID, orgID)
+	if err != nil {
+		if err == ErrUnauthorized {
+			response.Forbidden(w, "You do not have access to view this organization's members")
+			return
+		}
+		response.InternalServerError(w, "Failed to list members")
+		return
+	}
+	response.JSON(w, http.StatusOK, members)
+}

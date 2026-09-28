@@ -132,14 +132,18 @@ Adroit-platform/
 | | Core Directory Layout | Completed | Standard `cmd/`, `internal/`, `pkg/`, `deployments/` scaffolded for all 14 services. |
 | | Shared `pkg/logger` | Completed | Zero-dependency structured JSON/text logging via `log/slog` with request ID tracing. |
 | | Shared `pkg/response` | Completed | Standardized API JSON response envelope, error codes, and pagination metadata. |
-| | Shared `pkg/middleware` | Completed | RequestID injection, Slog logging, Panic Recovery, CORS, and Token Bucket Rate Limiter. |
+| | Shared `pkg/middleware` | Completed | RequestID, Slog, Panic Recovery, CORS, RequireAuth, and Token Bucket Rate Limiter. |
 | | Shared `pkg/types` | Completed | Universal domain models (Project, Service, Build, Deployment, Database, User). |
 | | Shared `pkg/events` | Completed | NATS JetStream typed event envelopes and domain subject definitions. |
 | | Shared `pkg/config` | Completed | 12-factor configuration loader with typed getters and fallback defaults. |
 | | Local Backing Services | Completed | `docker-compose.dev.yml` for Postgres, Redis, NATS (JetStream), Consul, Caddy. |
 | | API Gateway Entrypoint | Completed | `cmd/api-gateway/main.go` implemented and verified compiling with Chi router. |
-| **Phase 2: Core Microservices** | User & Auth Service | Up Next | Next priority. |
-| | Project & Service Catalog | Pending | Project/service configuration and env vars. |
+| **Phase 2: Core Microservices** | PostgreSQL Schema & Migrations | Completed | Migration DDL (`001_init_schema.up.sql`) and connection pool in `pkg/database`. |
+| | Identity & Crypto Primitives | Completed | `pkg/identity` for bcrypt password hashing (cost 12) and HMAC-SHA256 JWT tokens. |
+| | Auth Service | Completed | `internal/auth-service` & `cmd/auth-service`: Register, Login, Me, auto-workspace creation, rate limiting. |
+| | User & Organization Service | Completed | `internal/user-service` & `cmd/user-service`: User profiles, multi-tenant orgs, team memberships & RBAC. |
+| | All-in-One Dev Runner | Completed | `cmd/adroit-dev`: One-command runner launching Gateway, Auth, and User services concurrently. |
+| | Project & Service Catalog | Up Next | Defining projects, environments, service resources (vCPU, RAM), and git repos. |
 | | Build Service & Worker | Pending | BuildKit integration and Nomad batch job runner. |
 | | Orchestration & Runtime | Pending | Nomad driver, allocations, health monitoring. |
 | | Ingress & Caddy Routing | Pending | Dynamic edge reverse proxy routing via Consul. |
