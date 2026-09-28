@@ -31,13 +31,24 @@ The **API Gateway** is the central entrypoint for the Adroit Platform. It handle
 | `ADROIT_LOG_FORMAT` | string | `json` | Log format (`json` or `text`). |
 | `RATE_LIMIT_RPS` | int | `50` | Allowed sustained requests per second per client IP. |
 | `RATE_LIMIT_BURST` | int | `100` | Maximum burst capacity per client IP. |
+| `AUTH_SERVICE_URL` | string | `http://localhost:8081` | Downstream Auth Service URL. |
+| `USER_SERVICE_URL` | string | `http://localhost:8082` | Downstream User Service URL. |
 
 ---
 
 ## 3. How to Run Locally
 
-### Start Server
-```bash
+### Option A: Build and Run (Recommended for Windows)
+Avoids Windows Application Control / AppLocker blocks on `AppData\Local\Temp`:
+```powershell
+go build -o bin/api-gateway.exe ./cmd/api-gateway
+./bin/api-gateway.exe
+```
+
+### Option B: Direct `go run`
+If running directly, redirect `GOTMPDIR` out of `AppData\Local\Temp`:
+```powershell
+$env:GOTMPDIR = "$PWD\.gotmp"
 go run ./cmd/api-gateway/main.go
 ```
 The server will start listening on `http://0.0.0.0:8080`.
@@ -48,23 +59,25 @@ The server will start listening on `http://0.0.0.0:8080`.
 
 ### Run Unit Tests
 ```bash
-go test -v ./cmd/api-gateway
+go test -v ./cmd/api-gateway ./internal/api-gateway
 ```
 
 ### Run with Coverage
 ```bash
-go test -cover ./cmd/api-gateway
+go test -cover ./cmd/api-gateway ./internal/api-gateway
 ```
 
 ---
 
 ## 5. Routes & Endpoints
 
-| Method | Endpoint | Description | Auth Required |
+| Method | Endpoint | Routing / Target | Auth Required |
 | :--- | :--- | :--- | :--- |
 | `GET` | `/healthz` | Platform health check and timestamp | No |
 | `GET` | `/` | Platform gateway info and router status | No |
 | `GET` | `/api/v1/status` | API v1 subsystem status | No |
+| `*` | `/api/v1/auth/*` | **Reverse Proxied** to Auth Service (`:8081`) | By endpoint |
+| `*` | `/api/v1/users/*` | **Reverse Proxied** to User Service (`:8082`) | By endpoint |
 | `*` | `/*` | Custom 404 handler returning standard error envelope | N/A |
 
 ### Example cURL Commands

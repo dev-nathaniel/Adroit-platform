@@ -12,14 +12,21 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	apigateway "github.com/dev-nathaniel/Adroit-platform/internal/api-gateway"
 	"github.com/dev-nathaniel/Adroit-platform/pkg/config"
 	"github.com/dev-nathaniel/Adroit-platform/pkg/logger"
 	"github.com/dev-nathaniel/Adroit-platform/pkg/middleware"
 	"github.com/dev-nathaniel/Adroit-platform/pkg/response"
 )
 
-// SetupRouter creates and configures the Chi router and middleware chain
-func SetupRouter(log *slog.Logger, rl *middleware.RateLimiter) *chi.Mux {
+// DownstreamConfig holds target service URLs for reverse proxy routing
+type DownstreamConfig struct {
+	AuthServiceURL string
+	UserServiceURL string
+}
+
+// SetupRouter creates and configures the Chi router, middleware chain, and service proxies
+func SetupRouter(log *slog.Logger, rl *middleware.RateLimiter, downstreams DownstreamConfig) *chi.Mux {
 	r := chi.NewRouter()
 
 	// 1. Global Middlewares
@@ -33,16 +40,7 @@ func SetupRouter(log *slog.Logger, rl *middleware.RateLimiter) *chi.Mux {
 		r.Use(middleware.RateLimit(rl))
 	}
 
-	// 3. Custom 404 & 405 Handlers
-	r.NotFound(func(w http.ResponseWriter, r *http.Request) {
-		response.NotFound(w, fmt.Sprintf("Route %s %s not found", r.Method, r.URL.Path))
-	})
-
-	r.MethodNotAllowed(func(w http.ResponseWriter, r *http.Request) {
-		response.Error(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", fmt.Sprintf("Method %s not allowed on %s", r.Method, r.URL.Path), nil)
-	})
-
-	// 4. Platform Health & Diagnostics
+	// 3. Platform Diagnostics
 	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		response.JSON(w, http.StatusOK, map[string]any{
 			"status":    "healthy",
@@ -51,7 +49,7 @@ func SetupRouter(log *slog.Logger, rl *middleware.RateLimiter) *chi.Mux {
 		})
 	})
 
-	// 5. Gateway Root Endpoint
+	// 4. Gateway Root Endpoint
 	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
 		response.JSON(w, http.StatusOK, map[string]any{
 			"platform": "Adroit PaaS",
@@ -61,7 +59,7 @@ func SetupRouter(log *slog.Logger, rl *middleware.RateLimiter) *chi.Mux {
 		})
 	})
 
-	// 6. Versioned API Subroutes (Placeholder for core microservices proxying)
+	// 5. Versioned API Subroutes
 	r.Route("/api/v1", func(api chi.Router) {
 		api.Get("/status", func(w http.ResponseWriter, r *http.Request) {
 			response.JSON(w, http.StatusOK, map[string]string{
@@ -69,6 +67,30 @@ func SetupRouter(log *slog.Logger, rl *middleware.RateLimiter) *chi.Mux {
 				"status":      "active",
 			})
 		})
+	})
+
+	// 6. Reverse Proxy Routes for Downstream Microservices
+	if downstreams.AuthServiceURL != "" {
+		if authProxy, err := apigateway.CreateServiceProxy("auth-service", downstreams.AuthServiceURL, log); err == nil {
+			r.Mount("/api/v1/auth", authProxy)
+			log.Info("Mounted proxy for auth-service", slog.String("target", downstreams.AuthServiceURL))
+		}
+	}
+
+	if downstreams.UserServiceURL != "" {
+		if userProxy, err := apigateway.CreateServiceProxy("user-service", downstreams.UserServiceURL, log); err == nil {
+			r.Mount("/api/v1/users", userProxy)
+			log.Info("Mounted proxy for user-service", slog.String("target", downstreams.UserServiceURL))
+		}
+	}
+
+	// 7. Custom 404 & 405 Handlers
+	r.NotFound(func(w http.ResponseWriter, r *http.Request) {
+		response.NotFound(w, fmt.Sprintf("Route %s %s not found", r.Method, r.URL.Path))
+	})
+
+	r.MethodNotAllowed(func(w http.ResponseWriter, r *http.Request) {
+		response.Error(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", fmt.Sprintf("Method %s not allowed on %s", r.Method, r.URL.Path), nil)
 	})
 
 	return r
@@ -79,6 +101,11 @@ func main() {
 	baseCfg := config.LoadBaseConfig(8080)
 	rateLimitRPS := float64(config.GetEnvInt("RATE_LIMIT_RPS", 50))
 	rateLimitBurst := config.GetEnvInt("RATE_LIMIT_BURST", 100)
+
+	downstreams := DownstreamConfig{
+		AuthServiceURL: config.GetEnv("AUTH_SERVICE_URL", "http://localhost:8081"),
+		UserServiceURL: config.GetEnv("USER_SERVICE_URL", "http://localhost:8082"),
+	}
 
 	// 2. Initialize structured logger
 	log := logger.New(logger.Config{
@@ -91,6 +118,8 @@ func main() {
 		slog.Int("port", baseCfg.Port),
 		slog.Float64("rate_limit_rps", rateLimitRPS),
 		slog.Int("rate_limit_burst", rateLimitBurst),
+		slog.String("auth_service_url", downstreams.AuthServiceURL),
+		slog.String("user_service_url", downstreams.UserServiceURL),
 	)
 
 	// 3. Initialize Rate Limiter
@@ -98,7 +127,7 @@ func main() {
 	defer rl.Stop()
 
 	// 4. Initialize Router
-	router := SetupRouter(log, rl)
+	router := SetupRouter(log, rl, downstreams)
 
 	// 5. Configure HTTP server
 	addr := fmt.Sprintf(":%d", baseCfg.Port)
@@ -110,7 +139,7 @@ func main() {
 		IdleTimeout:  60 * time.Second,
 	}
 
-	// 5. Start server in goroutine
+	// 6. Start server in goroutine
 	go func() {
 		log.Info(fmt.Sprintf("API Gateway listening on http://0.0.0.0:%d", baseCfg.Port))
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -119,7 +148,7 @@ func main() {
 		}
 	}()
 
-	// 6. Graceful shutdown
+	// 7. Graceful shutdown
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit

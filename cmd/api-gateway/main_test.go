@@ -17,7 +17,7 @@ func TestAPIGatewayRouter(t *testing.T) {
 	rl := middleware.NewRateLimiter(5.0, 5)
 	defer rl.Stop()
 
-	router := SetupRouter(log, rl)
+	router := SetupRouter(log, rl, DownstreamConfig{})
 
 	t.Run("GET /healthz returns 200 and healthy", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
@@ -93,7 +93,7 @@ func TestAPIGatewayRouter(t *testing.T) {
 	t.Run("Exceeding rate limit returns 429 Too Many Requests", func(t *testing.T) {
 		strictRL := middleware.NewRateLimiter(1.0, 1)
 		defer strictRL.Stop()
-		strictRouter := SetupRouter(log, strictRL)
+		strictRouter := SetupRouter(log, strictRL, DownstreamConfig{})
 
 		// 1st request should pass
 		req1 := httptest.NewRequest(http.MethodGet, "/healthz", nil)
@@ -115,6 +115,34 @@ func TestAPIGatewayRouter(t *testing.T) {
 
 		if rec2.Header().Get("Retry-After") == "" {
 			t.Errorf("expected Retry-After header on 429")
+		}
+	})
+
+	t.Run("Proxy forwards traffic to downstream auth service", func(t *testing.T) {
+		mockAuth := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			response.JSON(w, http.StatusOK, map[string]string{
+				"service": "auth-service",
+				"path":    r.URL.Path,
+			})
+		}))
+		defer mockAuth.Close()
+
+		proxyRouter := SetupRouter(log, nil, DownstreamConfig{
+			AuthServiceURL: mockAuth.URL,
+		})
+
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/auth/me", nil)
+		rec := httptest.NewRecorder()
+		proxyRouter.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected 200 on proxied request, got %d", rec.Code)
+		}
+
+		var res response.APIResponse[map[string]string]
+		_ = json.Unmarshal(rec.Body.Bytes(), &res)
+		if res.Data["service"] != "auth-service" {
+			t.Errorf("expected service auth-service, got %s", res.Data["service"])
 		}
 	})
 }
