@@ -1,0 +1,115 @@
+package events
+
+import (
+	"crypto/rand"
+	"encoding/hex"
+	"time"
+
+	"github.com/dev-nathaniel/Adroit-platform/pkg/types"
+)
+
+// NATS JetStream Stream and Subject definitions
+const (
+	StreamName = "ADROIT_EVENTS"
+
+	// Project events
+	SubjectProjectCreated = "adroit.project.created"
+	SubjectProjectUpdated = "adroit.project.updated"
+	SubjectProjectDeleted = "adroit.project.deleted"
+
+	// Build events
+	SubjectBuildRequested = "adroit.build.requested"
+	SubjectBuildStarted   = "adroit.build.started"
+	SubjectBuildCompleted = "adroit.build.completed"
+	SubjectBuildFailed    = "adroit.build.failed"
+
+	// Deployment events
+	SubjectDeployRequested = "adroit.deploy.requested"
+	SubjectDeployStarted   = "adroit.deploy.started"
+	SubjectDeployHealthy   = "adroit.deploy.healthy"
+	SubjectDeployFailed    = "adroit.deploy.failed"
+	SubjectDeployStopped   = "adroit.deploy.stopped"
+
+	// Database events
+	SubjectDatabaseProvisionRequested = "adroit.database.provision_requested"
+	SubjectDatabaseProvisioned        = "adroit.database.provisioned"
+	SubjectDatabaseDeprovisioned      = "adroit.database.deprovisioned"
+
+	// Service scaling events
+	SubjectServiceScaleRequested = "adroit.service.scale_requested"
+)
+
+// Event is the universal CloudEvents-like envelope sent across NATS JetStream
+type Event[T any] struct {
+	ID        string    `json:"id"`
+	Subject   string    `json:"subject"`
+	Source    string    `json:"source"`
+	Timestamp time.Time `json:"timestamp"`
+	Data      T         `json:"data"`
+}
+
+// New creates an initialized Event envelope with random ID and UTC timestamp
+func New[T any](subject, source string, data T) Event[T] {
+	bytes := make([]byte, 12)
+	_, _ = rand.Read(bytes)
+	return Event[T]{
+		ID:        "evt_" + hex.EncodeToString(bytes),
+		Subject:   subject,
+		Source:    source,
+		Timestamp: time.Now().UTC(),
+		Data:      data,
+	}
+}
+
+// BuildRequestedPayload is emitted when a new commit or manual trigger initiates a build
+type BuildRequestedPayload struct {
+	BuildID        string            `json:"build_id"`
+	ServiceID      string            `json:"service_id"`
+	ProjectID      string            `json:"project_id"`
+	RepoURL        string            `json:"repo_url"`
+	Branch         string            `json:"branch"`
+	CommitHash     string            `json:"commit_hash"`
+	DockerfilePath string            `json:"dockerfile_path,omitempty"`
+	BuildArgs      map[string]string `json:"build_args,omitempty"`
+}
+
+// BuildCompletedPayload is emitted when BuildKit successfully produces an image
+type BuildCompletedPayload struct {
+	BuildID     string `json:"build_id"`
+	ServiceID   string `json:"service_id"`
+	ImageTag    string `json:"image_tag"`
+	ImageDigest string `json:"image_digest"`
+	DurationMs  int64  `json:"duration_ms"`
+}
+
+// DeployRequestedPayload is emitted to request the Orchestration Service to launch on Nomad
+type DeployRequestedPayload struct {
+	DeploymentID string                  `json:"deployment_id"`
+	ServiceID    string                  `json:"service_id"`
+	BuildID      string                  `json:"build_id"`
+	ImageTag     string                  `json:"image_tag"`
+	Port         int                     `json:"port"`
+	Replicas     int                     `json:"replicas"`
+	Resources    types.ResourceLimits    `json:"resources"`
+	HealthCheck  types.HealthCheckConfig `json:"health_check"`
+	EnvVars      map[string]string       `json:"env_vars,omitempty"`
+	RuntimeTier  types.RuntimeTier       `json:"runtime_tier"`
+}
+
+// DeployHealthyPayload is emitted when health-check sidecars confirm application readiness
+type DeployHealthyPayload struct {
+	DeploymentID string `json:"deployment_id"`
+	ServiceID    string `json:"service_id"`
+	NomadJobID   string `json:"nomad_job_id"`
+	ActiveURL    string `json:"active_url"`
+}
+
+// DatabaseProvisionPayload is emitted to initiate a managed database cluster
+type DatabaseProvisionPayload struct {
+	DatabaseID    string             `json:"database_id"`
+	ProjectID     string             `json:"project_id"`
+	Name          string             `json:"name"`
+	Type          types.DatabaseType `json:"type"`
+	Version       string             `json:"version"`
+	StorageSizeGB int                `json:"storage_size_gb"`
+}

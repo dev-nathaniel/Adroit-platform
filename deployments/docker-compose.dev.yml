@@ -1,0 +1,97 @@
+version: '3.8'
+
+services:
+  # ============================================================================
+  # PostgreSQL (Metadata & Relational State)
+  # ============================================================================
+  postgres:
+    image: postgres:16-alpine
+    container_name: adroit-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: adroit
+      POSTGRES_PASSWORD: adroit_secret
+      POSTGRES_DB: adroit_platform
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U adroit -d adroit_platform"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ============================================================================
+  # Redis (Cache, Sessions, Rate-Limiting)
+  # ============================================================================
+  redis:
+    image: redis:7-alpine
+    container_name: adroit-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # ============================================================================
+  # NATS with JetStream (Event-Driven Backbone)
+  # ============================================================================
+  nats:
+    image: nats:2.10-alpine
+    container_name: adroit-nats
+    restart: unless-stopped
+    command: ["-js", "-m", "8222"]
+    ports:
+      - "4222:4222" # NATS client port
+      - "8222:8222" # NATS monitoring dashboard / health
+    volumes:
+      - nats_data:/data
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8222/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # ============================================================================
+  # Consul (Service Registry & Mesh - Dev Mode)
+  # ============================================================================
+  consul:
+    image: hashicorp/consul:1.18
+    container_name: adroit-consul
+    restart: unless-stopped
+    command: ["agent", "-dev", "-client=0.0.0.0", "-ui"]
+    ports:
+      - "8500:8500" # UI and HTTP API
+      - "8600:8600/udp" # DNS interface
+    healthcheck:
+      test: ["CMD", "consul", "members"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # ============================================================================
+  # Caddy (Edge Reverse Proxy & Dynamic Routing)
+  # ============================================================================
+  caddy:
+    image: caddy:2.7-alpine
+    container_name: adroit-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  postgres_data:
+  redis_data:
+  nats_data:
+  caddy_data:
+  caddy_config:
