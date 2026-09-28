@@ -10,11 +10,64 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/go-chi/chi/v5"
+
 	"github.com/dev-nathaniel/Adroit-platform/pkg/config"
 	"github.com/dev-nathaniel/Adroit-platform/pkg/logger"
 	"github.com/dev-nathaniel/Adroit-platform/pkg/middleware"
 	"github.com/dev-nathaniel/Adroit-platform/pkg/response"
 )
+
+// SetupRouter creates and configures the Chi router and middleware chain
+func SetupRouter(log *slog.Logger) *chi.Mux {
+	r := chi.NewRouter()
+
+	// 1. Global Middlewares
+	r.Use(middleware.RequestID)
+	r.Use(middleware.Recovery(log))
+	r.Use(middleware.Logging(log))
+	r.Use(middleware.CORS("*"))
+
+	// 2. Custom 404 & 405 Handlers
+	r.NotFound(func(w http.ResponseWriter, r *http.Request) {
+		response.NotFound(w, fmt.Sprintf("Route %s %s not found", r.Method, r.URL.Path))
+	})
+
+	r.MethodNotAllowed(func(w http.ResponseWriter, r *http.Request) {
+		response.Error(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", fmt.Sprintf("Method %s not allowed on %s", r.Method, r.URL.Path), nil)
+	})
+
+	// 3. Platform Health & Diagnostics
+	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
+		response.JSON(w, http.StatusOK, map[string]any{
+			"status":    "healthy",
+			"service":   "api-gateway",
+			"timestamp": time.Now().UTC(),
+		})
+	})
+
+	// 4. Gateway Root Endpoint
+	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
+		response.JSON(w, http.StatusOK, map[string]any{
+			"platform": "Adroit PaaS",
+			"router":   "chi/v5",
+			"version":  "v1.0.0",
+			"status":   "operational",
+		})
+	})
+
+	// 5. Versioned API Subroutes (Placeholder for core microservices proxying)
+	r.Route("/api/v1", func(api chi.Router) {
+		api.Get("/status", func(w http.ResponseWriter, r *http.Request) {
+			response.JSON(w, http.StatusOK, map[string]string{
+				"api_version": "v1",
+				"status":      "active",
+			})
+		})
+	})
+
+	return r
+}
 
 func main() {
 	// 1. Load configuration
@@ -26,54 +79,25 @@ func main() {
 		Format: baseCfg.LogFormat,
 	})
 
-	log.Info("Starting Adroit API Gateway",
+	log.Info("Starting Adroit API Gateway with Chi Router",
 		slog.String("env", baseCfg.Env),
 		slog.Int("port", baseCfg.Port),
 	)
 
-	// 3. Setup router
-	mux := http.NewServeMux()
+	// 3. Initialize Router
+	router := SetupRouter(log)
 
-	// Health check endpoint
-	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
-		response.JSON(w, http.StatusOK, map[string]any{
-			"status":    "healthy",
-			"service":   "api-gateway",
-			"timestamp": time.Now().UTC(),
-		})
-	})
-
-	// Gateway root info endpoint
-	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/" {
-			response.NotFound(w, "Endpoint not found")
-			return
-		}
-		response.JSON(w, http.StatusOK, map[string]any{
-			"platform": "Adroit PaaS",
-			"version":  "v1.0.0",
-			"status":   "operational",
-		})
-	})
-
-	// 4. Apply middleware pipeline
-	var handler http.Handler = mux
-	handler = middleware.CORS("*")(handler)
-	handler = middleware.Logging(log)(handler)
-	handler = middleware.Recovery(log)(handler)
-	handler = middleware.RequestID(handler)
-
-	// 5. Configure HTTP server
+	// 4. Configure HTTP server
 	addr := fmt.Sprintf(":%d", baseCfg.Port)
 	srv := &http.Server{
 		Addr:         addr,
-		Handler:      handler,
+		Handler:      router,
 		ReadTimeout:  15 * time.Second,
 		WriteTimeout: 15 * time.Second,
 		IdleTimeout:  60 * time.Second,
 	}
 
-	// 6. Start server in goroutine
+	// 5. Start server in goroutine
 	go func() {
 		log.Info(fmt.Sprintf("API Gateway listening on http://0.0.0.0:%d", baseCfg.Port))
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -82,7 +106,7 @@ func main() {
 		}
 	}()
 
-	// 7. Graceful shutdown
+	// 6. Graceful shutdown
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
