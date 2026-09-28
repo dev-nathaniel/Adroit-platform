@@ -106,6 +106,16 @@ Adroit-platform/
    - Run tests with race detection: `go test -race ./...`
    - Run tests with coverage breakdown: `go test -cover ./...`
 
+6. **Module Documentation (Mandatory READMEs):**
+   - Every service (`cmd/<service>`, `internal/<service>`) and shared module (`pkg/<module>`) must include its own `README.md`.
+   - Each `README.md` must document:
+     - Purpose and responsibilities of the module.
+     - Configuration and environment variables.
+     - How to run locally.
+     - How to execute unit tests.
+     - Full route table (HTTP methods, paths, auth requirements, payloads).
+     - Core exported functions and API references.
+
 
 ---
 
