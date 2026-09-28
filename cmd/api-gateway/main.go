@@ -19,7 +19,7 @@ import (
 )
 
 // SetupRouter creates and configures the Chi router and middleware chain
-func SetupRouter(log *slog.Logger) *chi.Mux {
+func SetupRouter(log *slog.Logger, rl *middleware.RateLimiter) *chi.Mux {
 	r := chi.NewRouter()
 
 	// 1. Global Middlewares
@@ -28,7 +28,12 @@ func SetupRouter(log *slog.Logger) *chi.Mux {
 	r.Use(middleware.Logging(log))
 	r.Use(middleware.CORS("*"))
 
-	// 2. Custom 404 & 405 Handlers
+	// 2. Rate Limiting Middleware
+	if rl != nil {
+		r.Use(middleware.RateLimit(rl))
+	}
+
+	// 3. Custom 404 & 405 Handlers
 	r.NotFound(func(w http.ResponseWriter, r *http.Request) {
 		response.NotFound(w, fmt.Sprintf("Route %s %s not found", r.Method, r.URL.Path))
 	})
@@ -37,7 +42,7 @@ func SetupRouter(log *slog.Logger) *chi.Mux {
 		response.Error(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", fmt.Sprintf("Method %s not allowed on %s", r.Method, r.URL.Path), nil)
 	})
 
-	// 3. Platform Health & Diagnostics
+	// 4. Platform Health & Diagnostics
 	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		response.JSON(w, http.StatusOK, map[string]any{
 			"status":    "healthy",
@@ -46,7 +51,7 @@ func SetupRouter(log *slog.Logger) *chi.Mux {
 		})
 	})
 
-	// 4. Gateway Root Endpoint
+	// 5. Gateway Root Endpoint
 	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
 		response.JSON(w, http.StatusOK, map[string]any{
 			"platform": "Adroit PaaS",
@@ -56,7 +61,7 @@ func SetupRouter(log *slog.Logger) *chi.Mux {
 		})
 	})
 
-	// 5. Versioned API Subroutes (Placeholder for core microservices proxying)
+	// 6. Versioned API Subroutes (Placeholder for core microservices proxying)
 	r.Route("/api/v1", func(api chi.Router) {
 		api.Get("/status", func(w http.ResponseWriter, r *http.Request) {
 			response.JSON(w, http.StatusOK, map[string]string{
@@ -72,6 +77,8 @@ func SetupRouter(log *slog.Logger) *chi.Mux {
 func main() {
 	// 1. Load configuration
 	baseCfg := config.LoadBaseConfig(8080)
+	rateLimitRPS := float64(config.GetEnvInt("RATE_LIMIT_RPS", 50))
+	rateLimitBurst := config.GetEnvInt("RATE_LIMIT_BURST", 100)
 
 	// 2. Initialize structured logger
 	log := logger.New(logger.Config{
@@ -82,12 +89,18 @@ func main() {
 	log.Info("Starting Adroit API Gateway with Chi Router",
 		slog.String("env", baseCfg.Env),
 		slog.Int("port", baseCfg.Port),
+		slog.Float64("rate_limit_rps", rateLimitRPS),
+		slog.Int("rate_limit_burst", rateLimitBurst),
 	)
 
-	// 3. Initialize Router
-	router := SetupRouter(log)
+	// 3. Initialize Rate Limiter
+	rl := middleware.NewRateLimiter(rateLimitRPS, rateLimitBurst)
+	defer rl.Stop()
 
-	// 4. Configure HTTP server
+	// 4. Initialize Router
+	router := SetupRouter(log, rl)
+
+	// 5. Configure HTTP server
 	addr := fmt.Sprintf(":%d", baseCfg.Port)
 	srv := &http.Server{
 		Addr:         addr,

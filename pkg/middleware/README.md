@@ -22,6 +22,11 @@ The `middleware` package provides production-grade HTTP middlewares compatible w
 * **Signature:** `func(string) func(http.Handler) http.Handler`
 * **Function:** Configures Cross-Origin Resource Sharing headers (`Access-Control-Allow-Origin`, `Methods`, `Headers`, `Credentials`), and handles `OPTIONS` preflight requests immediately with `204 No Content`.
 
+### `middleware.RateLimit(rl *RateLimiter)`
+* **Signature:** `func(*RateLimiter) func(http.Handler) http.Handler`
+* **Function:** Token bucket rate limiter per client IP. Inspects `X-Forwarded-For` and `X-Real-IP` behind reverse proxies (e.g. Caddy/Load Balancer). Injects `X-RateLimit-Limit`, `X-RateLimit-Remaining`, and when quota is exhausted, injects `Retry-After` and returns a `429 Too Many Requests` JSON error. Includes background janitor to purge stale inactive client records.
+* **[TODO] Redis Cluster Backend:** Currently in-memory for zero latency in single-instance/dev setups. Will be extended with a Redis cluster backend for distributed synchronization across multi-node gateway clusters.
+
 ---
 
 ## 2. Usage with Chi Router

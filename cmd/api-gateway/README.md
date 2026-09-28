@@ -8,10 +8,16 @@ The **API Gateway** is the central entrypoint for the Adroit Platform. It handle
 
 * **Unified Ingress:** Accepts incoming HTTP requests and dispatches them to internal microservices.
 * **Routing Engine:** High-performance, idiomatic routing via `go-chi/chi/v5`.
+* **Rate Limiting:** Token-bucket rate limiting per client IP with `X-Forwarded-For` support and automatic 429 responses.
 * **Request Tracing:** Assigns or propagates `X-Request-ID` across HTTP requests and logs.
 * **Resilience:** Catches unhandled panics via recovery middleware to prevent process crashes.
 * **CORS:** Cross-Origin Resource Sharing for dashboard and mobile interfaces.
 * **Graceful Shutdown:** Intercepts `SIGINT`/`SIGTERM` and drains active connections before termination.
+
+### Rate Limiting Design & Roadmap
+* **Current Implementation:** In-memory Token Bucket (`pkg/middleware/ratelimit.go`). Provides zero-latency, zero-dependency per-IP throttling for single-instance / local development.
+* **Why not `chi.Throttle`:** Chi's built-in throttle only caps global concurrent in-flight requests server-wide; it does not track requests per second, time windows, or client IPs.
+* **[TODO] Redis Cluster Distributed Limiting:** When scaling the API Gateway to multiple nodes behind the Edge Load Balancer, the rate limiter will transition to the Redis Cluster to synchronize rate buckets across all nodes and support tier-based quotas (e.g. Free vs Pro tier).
 
 ---
 
@@ -23,6 +29,8 @@ The **API Gateway** is the central entrypoint for the Adroit Platform. It handle
 | `ADROIT_ENV` | string | `development` | Deployment environment (`development`, `staging`, `production`). |
 | `ADROIT_LOG_LEVEL` | string | `debug` | Logging verbosity (`debug`, `info`, `warn`, `error`). |
 | `ADROIT_LOG_FORMAT` | string | `json` | Log format (`json` or `text`). |
+| `RATE_LIMIT_RPS` | int | `50` | Allowed sustained requests per second per client IP. |
+| `RATE_LIMIT_BURST` | int | `100` | Maximum burst capacity per client IP. |
 
 ---
 
@@ -110,3 +118,31 @@ curl -i http://localhost:8080/non-existent
 }
 ```
 *(Notice the `X-Request-ID` header in the HTTP response headers).*
+
+#### 4. Rate Limit Exceeded (`429`)
+```bash
+curl -i http://localhost:8080/healthz
+```
+**Response Headers:**
+```http
+HTTP/1.1 429 Too Many Requests
+Content-Type: application/json; charset=utf-8
+X-RateLimit-Limit: 100
+X-RateLimit-Remaining: 0
+Retry-After: 2
+X-Request-ID: d58309a1bf04419999011be17fbfeb67
+```
+**Response Body:**
+```json
+{
+  "success": false,
+  "error": {
+    "code": "RATE_LIMITED",
+    "message": "Rate limit exceeded. Please wait before making more requests.",
+    "details": {
+      "limit": 100,
+      "retry_after_seconds": 2
+    }
+  }
+}
+```

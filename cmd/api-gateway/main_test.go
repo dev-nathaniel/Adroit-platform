@@ -8,12 +8,16 @@ import (
 	"testing"
 
 	"github.com/dev-nathaniel/Adroit-platform/pkg/logger"
+	"github.com/dev-nathaniel/Adroit-platform/pkg/middleware"
 	"github.com/dev-nathaniel/Adroit-platform/pkg/response"
 )
 
 func TestAPIGatewayRouter(t *testing.T) {
 	log := logger.New(logger.Config{Output: new(bytes.Buffer)})
-	router := SetupRouter(log)
+	rl := middleware.NewRateLimiter(5.0, 5)
+	defer rl.Stop()
+
+	router := SetupRouter(log, rl)
 
 	t.Run("GET /healthz returns 200 and healthy", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
@@ -83,6 +87,34 @@ func TestAPIGatewayRouter(t *testing.T) {
 
 		if res.Success || res.Error == nil || res.Error.Code != response.ErrCodeNotFound {
 			t.Errorf("expected NOT_FOUND error code, got %+v", res.Error)
+		}
+	})
+
+	t.Run("Exceeding rate limit returns 429 Too Many Requests", func(t *testing.T) {
+		strictRL := middleware.NewRateLimiter(1.0, 1)
+		defer strictRL.Stop()
+		strictRouter := SetupRouter(log, strictRL)
+
+		// 1st request should pass
+		req1 := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+		req1.RemoteAddr = "10.10.10.10:8000"
+		rec1 := httptest.NewRecorder()
+		strictRouter.ServeHTTP(rec1, req1)
+		if rec1.Code != http.StatusOK {
+			t.Fatalf("expected first request 200, got %d", rec1.Code)
+		}
+
+		// 2nd immediate request from same IP should get 429
+		req2 := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+		req2.RemoteAddr = "10.10.10.10:8000"
+		rec2 := httptest.NewRecorder()
+		strictRouter.ServeHTTP(rec2, req2)
+		if rec2.Code != http.StatusTooManyRequests {
+			t.Fatalf("expected second request 429, got %d", rec2.Code)
+		}
+
+		if rec2.Header().Get("Retry-After") == "" {
+			t.Errorf("expected Retry-After header on 429")
 		}
 	})
 }

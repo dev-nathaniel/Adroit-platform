@@ -116,6 +116,10 @@ Adroit-platform/
      - Full route table (HTTP methods, paths, auth requirements, payloads).
      - Core exported functions and API references.
 
+7. **Rate Limiting Architecture & Evolution:**
+   - **Why not `chi.Throttle`:** Chi's built-in throttle only caps global concurrent in-flight requests server-wide; it does not track requests per second, time windows, or client IPs.
+   - **Current Pattern (In-Memory Token Bucket):** Implemented in `pkg/middleware/ratelimit.go` using a thread-safe token bucket algorithm with per-IP tracking and background cleanup. Optimal for local development and single-instance deployments (zero external latency, zero dependencies).
+   - **[TODO] Multi-Node Distributed Limiter (Redis Cluster):** In multi-node production deployments where multiple API Gateway replicas run behind the Edge Load Balancer, rate limits will be synchronized globally across nodes via the **Redis Cluster** (already provisioned in `deployments/docker-compose.dev.yml`). This also enables customer-tier rate quotas (e.g. Free: 100 req/min, Pro: 5,000 req/min).
 
 ---
 
@@ -128,14 +132,15 @@ Adroit-platform/
 | | Core Directory Layout | Completed | Standard `cmd/`, `internal/`, `pkg/`, `deployments/` scaffolded for all 14 services. |
 | | Shared `pkg/logger` | Completed | Zero-dependency structured JSON/text logging via `log/slog` with request ID tracing. |
 | | Shared `pkg/response` | Completed | Standardized API JSON response envelope, error codes, and pagination metadata. |
-| | Shared `pkg/middleware` | Completed | RequestID injection, Slog logging, Panic Recovery, and CORS middleware. |
+| | Shared `pkg/middleware` | Completed | RequestID injection, Slog logging, Panic Recovery, CORS, and Token Bucket Rate Limiter. |
 | | Shared `pkg/types` | Completed | Universal domain models (Project, Service, Build, Deployment, Database, User). |
 | | Shared `pkg/events` | Completed | NATS JetStream typed event envelopes and domain subject definitions. |
 | | Shared `pkg/config` | Completed | 12-factor configuration loader with typed getters and fallback defaults. |
 | | Local Backing Services | Completed | `docker-compose.dev.yml` for Postgres, Redis, NATS (JetStream), Consul, Caddy. |
-| | API Gateway Entrypoint | Completed | `cmd/api-gateway/main.go` implemented and verified compiling. |
+| | API Gateway Entrypoint | Completed | `cmd/api-gateway/main.go` implemented and verified compiling with Chi router. |
 | **Phase 2: Core Microservices** | User & Auth Service | Up Next | Next priority. |
 | | Project & Service Catalog | Pending | Project/service configuration and env vars. |
 | | Build Service & Worker | Pending | BuildKit integration and Nomad batch job runner. |
 | | Orchestration & Runtime | Pending | Nomad driver, allocations, health monitoring. |
 | | Ingress & Caddy Routing | Pending | Dynamic edge reverse proxy routing via Consul. |
+| | Distributed Rate Limiting | **TODO** | Upgrade rate limiting to Redis Cluster backend for multi-node gateway sync. |
