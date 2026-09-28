@@ -100,6 +100,13 @@ Adroit-platform/
 4. **12-Factor Configuration:**
    - All services read configurations from environment variables with sensible defaults for local development.
 
+5. **Testing Standards:**
+   - Unit tests accompany all shared packages and service handlers.
+   - Run tests with: `go test -v ./...`
+   - Run tests with race detection: `go test -race ./...`
+   - Run tests with coverage breakdown: `go test -cover ./...`
+
+
 ---
 
 ## 3. Implementation Progress Tracker
