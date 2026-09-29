@@ -110,6 +110,9 @@ func main() {
 		}
 		binPath := filepath.Join(binDir, binName)
 
+		// Remove existing binary first to clear stale locks or Application Control file tags
+		_ = os.Remove(binPath)
+
 		fmt.Printf("   -> Building %s (%s) ... ", s.Name, s.Pkg)
 		cmd := exec.Command("go", "build", "-o", binPath, s.Pkg)
 		cmd.Stdout = os.Stdout
