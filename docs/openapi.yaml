@@ -1,0 +1,1306 @@
+openapi: 3.0.3
+info:
+  title: Adroit Platform API
+  description: |
+    Comprehensive API specification for the **Adroit Multi-Tenant Cloud Platform-as-a-Service (PaaS)**.
+    
+    All requests in development are routed through the central **API Gateway** on port `8080`,
+    which handles cross-cutting concerns (rate limiting, request ID propagation, CORS, panic recovery)
+    and reverse proxies traffic to downstream microservices:
+    - **Auth Service**: `/api/v1/auth/*` (Port `8081`)
+    - **User & Organization Service**: `/api/v1/users/*` (Port `8082`)
+
+    ### Standard Response Format
+    All responses use a standardized JSON envelope:
+    ```json
+    {
+      "success": true,
+      "data": { ... },
+      "meta": { "page": 1, "per_page": 20, "total_items": 100, "total_pages": 5 }
+    }
+    ```
+    Errors return:
+    ```json
+    {
+      "success": false,
+      "error": {
+        "code": "INVALID_REQUEST",
+        "message": "Detailed error message",
+        "details": null
+      }
+    }
+    ```
+  version: 1.0.0
+  contact:
+    name: Adroit Engineering Team
+    url: https://github.com/dev-nathaniel/Adroit-platform
+
+servers:
+  - url: http://localhost:8080
+    description: API Gateway (Central Local Development Ingress)
+  - url: http://localhost:8081
+    description: Auth Service (Direct Microservice Port)
+  - url: http://localhost:8082
+    description: User & Organization Service (Direct Microservice Port)
+
+tags:
+  - name: System & Gateway
+    description: Gateway health, information, and status probes
+  - name: Authentication
+    description: User registration, login, credential verification, and JWT session profiles
+  - name: User Profiles
+    description: User account information and profile customization
+  - name: Organizations & Workspaces
+    description: Multi-tenant workspace management, memberships, and role assignments
+  - name: Organization Invitations
+    description: Team invitation lifecycle (create, preview, accept, list, revoke)
+
+paths:
+  # ==========================================
+  # SYSTEM & GATEWAY
+  # ==========================================
+  /healthz:
+    get:
+      tags:
+        - System & Gateway
+      summary: Health Check
+      description: Returns health status of the API Gateway and current server UTC timestamp.
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponseEnvelope'
+
+  /:
+    get:
+      tags:
+        - System & Gateway
+      summary: Gateway Information
+      description: Returns gateway runtime metadata, routing engine status, and version.
+      responses:
+        '200':
+          description: Gateway operational metadata
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GatewayInfoResponseEnvelope'
+
+  /api/v1/status:
+    get:
+      tags:
+        - System & Gateway
+      summary: API v1 Subsystem Status
+      description: Verifies that the API v1 subsystem is active and operational.
+      responses:
+        '200':
+          description: API v1 subsystem active status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatusResponseEnvelope'
+
+  # ==========================================
+  # AUTHENTICATION
+  # ==========================================
+  /api/v1/auth/register:
+    post:
+      tags:
+        - Authentication
+      summary: Register User
+      description: |
+        Registers a new user account with bcrypt password hashing (cost factor 12),
+        automatically creates a personal default workspace (Organization), and issues an HMAC-SHA256 JWT token.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+      responses:
+        '201':
+          description: User registered successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponseEnvelope'
+        '400':
+          description: Invalid email format or password shorter than 8 characters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '409':
+          description: User with this email already exists
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+
+  /api/v1/auth/login:
+    post:
+      tags:
+        - Authentication
+      summary: Authenticate User
+      description: Authenticates user credentials and issues a signed JWT Bearer token valid for 24 hours.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Authentication successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponseEnvelope'
+        '400':
+          description: Malformed JSON body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '401':
+          description: Invalid email or password
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+
+  /api/v1/auth/me:
+    get:
+      tags:
+        - Authentication
+      summary: Current Session Profile
+      description: Returns the user profile associated with the provided JWT Bearer token.
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Current user profile
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponseEnvelope'
+        '401':
+          description: Missing or invalid authorization token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '404':
+          description: User account not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+
+  # ==========================================
+  # USER PROFILES
+  # ==========================================
+  /api/v1/users/profile:
+    get:
+      tags:
+        - User Profiles
+      summary: Get Caller Profile
+      description: Returns the full profile of the authenticated caller.
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Caller profile details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponseEnvelope'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '404':
+          description: Profile not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+
+    patch:
+      tags:
+        - User Profiles
+      summary: Update Caller Profile
+      description: Updates display name or avatar URL for the authenticated user.
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateProfileRequest'
+      responses:
+        '200':
+          description: Profile successfully updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponseEnvelope'
+        '400':
+          description: Invalid request payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+
+  # ==========================================
+  # ORGANIZATIONS & WORKSPACES
+  # ==========================================
+  /api/v1/users/organizations:
+    get:
+      tags:
+        - Organizations & Workspaces
+      summary: List Organizations
+      description: Lists all organization workspaces that the caller is a member of.
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: List of organizations
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrganizationListResponseEnvelope'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+
+    post:
+      tags:
+        - Organizations & Workspaces
+      summary: Create Organization
+      description: Creates a new multi-tenant workspace with the caller as the `owner`.
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateOrgRequest'
+      responses:
+        '201':
+          description: Organization created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrganizationResponseEnvelope'
+        '400':
+          description: Missing organization name
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+
+  /api/v1/users/organizations/{orgID}:
+    get:
+      tags:
+        - Organizations & Workspaces
+      summary: Get Organization Details
+      description: Returns details of a specific organization including active member count and the caller's role.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: orgID
+          in: path
+          required: true
+          description: UUID of the organization
+          schema:
+            type: string
+            format: uuid
+            example: "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+      responses:
+        '200':
+          description: Organization details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrgDetailResponseEnvelope'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '403':
+          description: Access denied (caller is not a member of this organization)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '404':
+          description: Organization not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+
+  /api/v1/users/organizations/{orgID}/members:
+    get:
+      tags:
+        - Organizations & Workspaces
+      summary: List Organization Members
+      description: Lists all members belonging to an organization. Caller must be a member.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: orgID
+          in: path
+          required: true
+          description: UUID of the organization
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: List of organization members
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrgMemberListResponseEnvelope'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '403':
+          description: Caller is not a member of this organization
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+
+    post:
+      tags:
+        - Organizations & Workspaces
+      summary: Add Member Directly
+      description: Directly adds an existing user to an organization with a specified role (`owner`, `admin`, `member`). Caller must be an `owner` or `admin`.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: orgID
+          in: path
+          required: true
+          description: UUID of the organization
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddMemberRequest'
+      responses:
+        '201':
+          description: Member added successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrgMemberInfoResponseEnvelope'
+        '400':
+          description: Invalid email or role
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '403':
+          description: Insufficient permissions (requires owner or admin role)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '404':
+          description: User with email not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '409':
+          description: User is already a member of this organization
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+
+  # ==========================================
+  # ORGANIZATION INVITATIONS
+  # ==========================================
+  /api/v1/users/organizations/{orgID}/invitations:
+    get:
+      tags:
+        - Organization Invitations
+      summary: List Organization Invitations
+      description: Lists pending invitations for the specified organization. Caller must be an `owner` or `admin`.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: orgID
+          in: path
+          required: true
+          description: UUID of the organization
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: List of pending invitations
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InvitationListResponseEnvelope'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '403':
+          description: Insufficient permissions (requires owner or admin role)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+
+    post:
+      tags:
+        - Organization Invitations
+      summary: Create Organization Invitation
+      description: |
+        Generates a cryptographically secure token and pending invitation for an email address.
+        Returns the invitation object alongside the raw `token` and `invite_url` (valid for 7 days).
+        Caller must be an `owner` or `admin`.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: orgID
+          in: path
+          required: true
+          description: UUID of the organization
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateInvitationRequest'
+      responses:
+        '201':
+          description: Invitation created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InvitationResponseEnvelope'
+        '400':
+          description: Invalid email or role (must be 'admin' or 'member')
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '403':
+          description: Insufficient permissions
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '409':
+          description: User is already a member, or has an active pending invitation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+
+  /api/v1/users/organizations/{orgID}/invitations/{inviteID}:
+    delete:
+      tags:
+        - Organization Invitations
+      summary: Revoke Organization Invitation
+      description: Revokes a pending invitation before it is accepted or expired. Caller must be an `owner` or `admin`.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: orgID
+          in: path
+          required: true
+          description: UUID of the organization
+          schema:
+            type: string
+            format: uuid
+        - name: inviteID
+          in: path
+          required: true
+          description: UUID of the invitation
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Invitation revoked successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponseEnvelope'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '403':
+          description: Insufficient permissions
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '404':
+          description: Invitation not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+
+  /api/v1/users/invitations/{token}:
+    get:
+      tags:
+        - Organization Invitations
+      summary: Preview Invitation Details
+      description: |
+        Public endpoint allowing recipients to view invitation metadata (organization name, inviter name, role, expiration)
+        before authenticating or accepting.
+      parameters:
+        - name: token
+          in: path
+          required: true
+          description: 64-character hex invitation token
+          schema:
+            type: string
+            example: "4b87ad23f2f54019f20e98c769438096"
+      responses:
+        '200':
+          description: Invitation preview metadata
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InvitationPreviewResponseEnvelope'
+        '404':
+          description: Invitation token not found, already accepted, revoked, or expired
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+
+  /api/v1/users/invitations/{token}/accept:
+    post:
+      tags:
+        - Organization Invitations
+      summary: Accept Organization Invitation
+      description: |
+        Accepts the invitation and adds the caller into the organization workspace with the assigned role.
+        Caller must be logged in, and their registered account email must match the invitation email.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: token
+          in: path
+          required: true
+          description: 64-character hex invitation token
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Invitation accepted, caller added to workspace
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AcceptInvitationResponseEnvelope'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '403':
+          description: Authenticated user email does not match invitation recipient email
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '404':
+          description: Invitation not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '409':
+          description: Invitation already accepted, revoked, or user already a member
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+
+# ==========================================
+# COMPONENTS & SCHEMAS
+# ==========================================
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Standard HMAC-SHA256 JWT issued by `/api/v1/auth/login` or `/api/v1/auth/register`.
+
+  schemas:
+    # --- Universal Response Envelopes ---
+    ErrorResponseEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: false
+        error:
+          $ref: '#/components/schemas/APIError'
+      required:
+        - success
+        - error
+
+    APIError:
+      type: object
+      properties:
+        code:
+          type: string
+          example: "INVALID_REQUEST"
+        message:
+          type: string
+          example: "Detailed error message"
+        details:
+          nullable: true
+          description: Optional structured context or validation field errors
+      required:
+        - code
+        - message
+
+    Pagination:
+      type: object
+      properties:
+        page:
+          type: integer
+          example: 1
+        per_page:
+          type: integer
+          example: 20
+        total_items:
+          type: integer
+          example: 45
+        total_pages:
+          type: integer
+          example: 3
+      required:
+        - page
+        - per_page
+        - total_items
+        - total_pages
+
+    MessageResponseEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: object
+          properties:
+            message:
+              type: string
+              example: "Operation completed successfully"
+      required:
+        - success
+        - data
+
+    # --- System Schemas ---
+    HealthResponseEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: object
+          properties:
+            platform:
+              type: string
+              example: "Adroit PaaS"
+            service:
+              type: string
+              example: "api-gateway"
+            status:
+              type: string
+              example: "healthy"
+            timestamp:
+              type: string
+              format: date-time
+              example: "2026-09-29T23:50:00Z"
+      required:
+        - success
+        - data
+
+    GatewayInfoResponseEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: object
+          properties:
+            platform:
+              type: string
+              example: "Adroit PaaS"
+            router:
+              type: string
+              example: "chi/v5"
+            status:
+              type: string
+              example: "operational"
+            version:
+              type: string
+              example: "v1.0.0"
+      required:
+        - success
+        - data
+
+    StatusResponseEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: object
+          properties:
+            api_version:
+              type: string
+              example: "v1"
+            status:
+              type: string
+              example: "active"
+      required:
+        - success
+        - data
+
+    # --- Auth Schemas ---
+    RegisterRequest:
+      type: object
+      required:
+        - email
+        - password
+      properties:
+        email:
+          type: string
+          format: email
+          example: "engineer@adroit.run"
+        name:
+          type: string
+          example: "Jane Doe"
+        password:
+          type: string
+          format: password
+          minLength: 8
+          example: "SuperSecurePass123!"
+
+    LoginRequest:
+      type: object
+      required:
+        - email
+        - password
+      properties:
+        email:
+          type: string
+          format: email
+          example: "engineer@adroit.run"
+        password:
+          type: string
+          format: password
+          example: "SuperSecurePass123!"
+
+    AuthResponse:
+      type: object
+      properties:
+        token:
+          type: string
+          description: Signed JWT Bearer token
+          example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+        user:
+          $ref: '#/components/schemas/User'
+        organization:
+          $ref: '#/components/schemas/Organization'
+      required:
+        - token
+        - user
+
+    AuthResponseEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          $ref: '#/components/schemas/AuthResponse'
+      required:
+        - success
+        - data
+
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d"
+        email:
+          type: string
+          format: email
+          example: "engineer@adroit.run"
+        name:
+          type: string
+          example: "Jane Doe"
+        avatar_url:
+          type: string
+          example: "https://assets.adroit.run/avatars/jane.png"
+        created_at:
+          type: string
+          format: date-time
+          example: "2026-09-29T20:00:00Z"
+        updated_at:
+          type: string
+          format: date-time
+          example: "2026-09-29T20:00:00Z"
+      required:
+        - id
+        - email
+        - name
+        - created_at
+        - updated_at
+
+    UserResponseEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          $ref: '#/components/schemas/User'
+      required:
+        - success
+        - data
+
+    UpdateProfileRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          example: "Senior Cloud Engineer"
+        avatar_url:
+          type: string
+          example: "https://assets.adroit.run/avatars/new.png"
+
+    # --- Organization Schemas ---
+    Organization:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: "a8098c1a-f86e-11da-bd1a-00112444be1e"
+        name:
+          type: string
+          example: "Engineering Core"
+        slug:
+          type: string
+          example: "engineering-core"
+        owner_id:
+          type: string
+          format: uuid
+          example: "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d"
+        created_at:
+          type: string
+          format: date-time
+          example: "2026-09-29T20:00:00Z"
+        updated_at:
+          type: string
+          format: date-time
+          example: "2026-09-29T20:00:00Z"
+      required:
+        - id
+        - name
+        - slug
+        - owner_id
+        - created_at
+        - updated_at
+
+    OrgDetail:
+      allOf:
+        - $ref: '#/components/schemas/Organization'
+        - type: object
+          properties:
+            user_role:
+              type: string
+              example: "owner"
+            member_count:
+              type: integer
+              example: 4
+          required:
+            - user_role
+            - member_count
+
+    OrgMemberInfo:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: "348c4746-8e50-4fc7-bfa7-a3f295bc6811"
+        user_id:
+          type: string
+          format: uuid
+          example: "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d"
+        email:
+          type: string
+          format: email
+          example: "colleague@adroit.run"
+        name:
+          type: string
+          example: "Alex Smith"
+        role:
+          type: string
+          enum: [owner, admin, member]
+          example: "admin"
+        joined_at:
+          type: string
+          format: date-time
+          example: "2026-09-29T21:15:00Z"
+      required:
+        - id
+        - user_id
+        - email
+        - name
+        - role
+        - joined_at
+
+    CreateOrgRequest:
+      type: object
+      required:
+        - name
+      properties:
+        name:
+          type: string
+          example: "Platform Operations"
+        slug:
+          type: string
+          example: "platform-ops"
+
+    AddMemberRequest:
+      type: object
+      required:
+        - email
+        - role
+      properties:
+        email:
+          type: string
+          format: email
+          example: "teammate@adroit.run"
+        role:
+          type: string
+          enum: [owner, admin, member]
+          example: "admin"
+
+    OrganizationResponseEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          $ref: '#/components/schemas/Organization'
+      required:
+        - success
+        - data
+
+    OrganizationListResponseEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Organization'
+      required:
+        - success
+        - data
+
+    OrgDetailResponseEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          $ref: '#/components/schemas/OrgDetail'
+      required:
+        - success
+        - data
+
+    OrgMemberListResponseEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrgMemberInfo'
+      required:
+        - success
+        - data
+
+    OrgMemberInfoResponseEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          $ref: '#/components/schemas/OrgMemberInfo'
+      required:
+        - success
+        - data
+
+    # --- Invitation Schemas ---
+    CreateInvitationRequest:
+      type: object
+      required:
+        - email
+        - role
+      properties:
+        email:
+          type: string
+          format: email
+          example: "invitee@adroit.run"
+        role:
+          type: string
+          enum: [admin, member]
+          example: "member"
+
+    OrganizationInvitation:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        organization_id:
+          type: string
+          format: uuid
+          example: "a8098c1a-f86e-11da-bd1a-00112444be1e"
+        email:
+          type: string
+          format: email
+          example: "invitee@adroit.run"
+        role:
+          type: string
+          enum: [admin, member]
+          example: "member"
+        invited_by:
+          type: string
+          format: uuid
+          example: "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d"
+        status:
+          type: string
+          enum: [pending, accepted, revoked, expired]
+          example: "pending"
+        expires_at:
+          type: string
+          format: date-time
+          example: "2026-10-06T20:00:00Z"
+        created_at:
+          type: string
+          format: date-time
+          example: "2026-09-29T20:00:00Z"
+      required:
+        - id
+        - organization_id
+        - email
+        - role
+        - invited_by
+        - status
+        - expires_at
+        - created_at
+
+    InvitationResponse:
+      allOf:
+        - $ref: '#/components/schemas/OrganizationInvitation'
+        - type: object
+          properties:
+            token:
+              type: string
+              example: "4b87ad23f2f54019f20e98c769438096"
+            invite_url:
+              type: string
+              example: "http://localhost:8080/api/v1/users/invitations/4b87ad23f2f54019f20e98c769438096"
+          required:
+            - token
+            - invite_url
+
+    InvitationResponseEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          $ref: '#/components/schemas/InvitationResponse'
+      required:
+        - success
+        - data
+
+    InvitationListResponseEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrganizationInvitation'
+      required:
+        - success
+        - data
+
+    InvitationPreview:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        organization_id:
+          type: string
+          format: uuid
+          example: "a8098c1a-f86e-11da-bd1a-00112444be1e"
+        organization_name:
+          type: string
+          example: "Engineering Core"
+        email:
+          type: string
+          format: email
+          example: "invitee@adroit.run"
+        role:
+          type: string
+          example: "member"
+        invited_by_name:
+          type: string
+          example: "Jane Doe"
+        expires_at:
+          type: string
+          format: date-time
+          example: "2026-10-06T20:00:00Z"
+      required:
+        - id
+        - organization_id
+        - organization_name
+        - email
+        - role
+        - invited_by_name
+        - expires_at
+
+    InvitationPreviewResponseEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          $ref: '#/components/schemas/InvitationPreview'
+      required:
+        - success
+        - data
+
+    AcceptInvitationResponse:
+      type: object
+      properties:
+        organization_id:
+          type: string
+          format: uuid
+          example: "a8098c1a-f86e-11da-bd1a-00112444be1e"
+        organization_name:
+          type: string
+          example: "Engineering Core"
+        role:
+          type: string
+          example: "member"
+        message:
+          type: string
+          example: "Successfully joined workspace Engineering Core"
+      required:
+        - organization_id
+        - organization_name
+        - role
+        - message
+
+    AcceptInvitationResponseEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          $ref: '#/components/schemas/AcceptInvitationResponse'
+      required:
+        - success
+        - data

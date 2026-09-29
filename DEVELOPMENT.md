@@ -56,6 +56,11 @@ Adroit-platform/
 │   ├── events/                      # NATS JetStream event definitions & payload envelopes
 │   └── types/                       # Shared domain models & enumerations
 │
+├── docs/                            # API Specifications & Developer Tooling
+│   ├── openapi.yaml                 # OpenAPI 3.0.3 specification
+│   ├── adroit-platform.postman_collection.json # Postman Collection v2.1.0 with auto-token chaining
+│   └── README.md                    # Usage guide for Swagger UI and Postman
+│
 └── deployments/                     # Infrastructure as Code & Orchestration
     ├── docker-compose.dev.yml       # Local development stack (Postgres, Redis, NATS, Consul)
     └── nomad/                       # Nomad HCL job definitions
@@ -148,6 +153,7 @@ Adroit-platform/
 | | Identity & Crypto Primitives | Completed | `pkg/identity` for bcrypt password hashing (cost 12) and HMAC-SHA256 JWT tokens. |
 | | Auth Service | Completed | `internal/auth-service` & `cmd/auth-service`: Register, Login, Me, auto-workspace creation, rate limiting. |
 | | User & Organization Service | Completed | `internal/user-service` & `cmd/user-service`: User profiles, multi-tenant orgs, team memberships & RBAC. |
+| | API Specifications & Postman | Completed | OpenAPI 3.0.3 (`docs/openapi.yaml`) & Postman Collection v2.1.0 (`docs/adroit-platform.postman_collection.json`) with auto-token chaining. |
 | | All-in-One Dev Runner | Completed | `cmd/adroit-dev`: One-command runner launching Gateway, Auth, and User services concurrently. |
 | | Project & Service Catalog | Up Next | Defining projects, environments, service resources (vCPU, RAM), and git repos. |
 | | Build Service & Worker | Pending | BuildKit integration and Nomad batch job runner. |

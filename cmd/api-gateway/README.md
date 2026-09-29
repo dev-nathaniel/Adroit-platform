@@ -71,6 +71,9 @@ go test -cover ./cmd/api-gateway ./internal/api-gateway
 
 ## 5. Routes & Endpoints
 
+> [!TIP]
+> Complete API specifications are available in **OpenAPI 3.0** format at [`docs/openapi.yaml`](../../docs/openapi.yaml) and as an importable **Postman Collection v2.1.0** at [`docs/adroit-platform.postman_collection.json`](../../docs/adroit-platform.postman_collection.json). See [`docs/README.md`](../../docs/README.md) for details.
+
 | Method | Endpoint | Routing / Target | Auth Required |
 | :--- | :--- | :--- | :--- |
 | `GET` | `/healthz` | Platform health check and timestamp | No |

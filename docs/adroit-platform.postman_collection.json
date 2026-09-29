@@ -1,0 +1,625 @@
+{
+	"info": {
+		"_postman_id": "c71a3962-e910-4bf6-b519-86ec037951a1",
+		"name": "Adroit Platform API",
+		"description": "Postman collection for the Adroit Multi-Tenant Cloud Platform-as-a-Service (PaaS).\n\nFeatures automated token extraction, dynamic environment variable updates, and complete coverage of API Gateway, Auth Service, and User/Workspace microservices.",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"auth": {
+		"type": "bearer",
+		"bearer": [
+			{
+				"key": "token",
+				"value": "{{token}}",
+				"type": "string"
+			}
+		]
+	},
+	"variable": [
+		{
+			"key": "baseUrl",
+			"value": "http://localhost:8080",
+			"type": "string"
+		},
+		{
+			"key": "token",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "orgId",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "inviteToken",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "inviteId",
+			"value": "",
+			"type": "string"
+		}
+	],
+	"item": [
+		{
+			"name": "1. System & Gateway",
+			"item": [
+				{
+					"name": "Health Check",
+					"request": {
+						"auth": {
+							"type": "noauth"
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/healthz",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"healthz"
+							]
+						},
+						"description": "Returns health status of the API Gateway and current timestamp."
+					},
+					"response": []
+				},
+				{
+					"name": "Gateway Info",
+					"request": {
+						"auth": {
+							"type": "noauth"
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								""
+							]
+						},
+						"description": "Returns platform runtime metadata and router status."
+					},
+					"response": []
+				},
+				{
+					"name": "API v1 Status",
+					"request": {
+						"auth": {
+							"type": "noauth"
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/status",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"status"
+							]
+						},
+						"description": "Checks operational status of the API v1 routing subsystem."
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "2. Authentication",
+			"item": [
+				{
+					"name": "Register User",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 201) {",
+									"    var res = pm.response.json();",
+									"    if (res.data && res.data.token) {",
+									"        pm.collectionVariables.set('token', res.data.token);",
+									"        console.log('Saved token to collection variable: token');",
+									"    }",
+									"    if (res.data && res.data.organization && res.data.organization.id) {",
+									"        pm.collectionVariables.set('orgId', res.data.organization.id);",
+									"        console.log('Saved default workspace id to collection variable: orgId');",
+									"    }",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "noauth"
+						},
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"email\": \"dev@adroit.run\",\n    \"name\": \"Cloud Engineer\",\n    \"password\": \"SuperSecurePassword123!\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/auth/register",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"auth",
+								"register"
+							]
+						},
+						"description": "Registers a new user, hashes password with bcrypt, creates personal workspace, and returns JWT."
+					},
+					"response": []
+				},
+				{
+					"name": "Login User",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    var res = pm.response.json();",
+									"    if (res.data && res.data.token) {",
+									"        pm.collectionVariables.set('token', res.data.token);",
+									"        console.log('Saved token to collection variable: token');",
+									"    }",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "noauth"
+						},
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"email\": \"dev@adroit.run\",\n    \"password\": \"SuperSecurePassword123!\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/auth/login",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"auth",
+								"login"
+							]
+						},
+						"description": "Authenticates user credentials and issues a signed JWT token."
+					},
+					"response": []
+				},
+				{
+					"name": "Get Current User Profile (/me)",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/auth/me",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"auth",
+								"me"
+							]
+						},
+						"description": "Returns the authenticated user session profile from token claims."
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "3. User Profiles",
+			"item": [
+				{
+					"name": "Get Caller Profile",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/users/profile",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"users",
+								"profile"
+							]
+						},
+						"description": "Fetches caller's personal profile."
+					},
+					"response": []
+				},
+				{
+					"name": "Update Profile",
+					"request": {
+						"method": "PATCH",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"name\": \"Principal Cloud Architect\",\n    \"avatar_url\": \"https://assets.adroit.run/avatars/architect.png\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/users/profile",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"users",
+								"profile"
+							]
+						},
+						"description": "Updates caller's display name or avatar URL."
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "4. Organizations & Workspaces",
+			"item": [
+				{
+					"name": "List Organizations",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    var res = pm.response.json();",
+									"    if (res.data && res.data.length > 0 && !pm.collectionVariables.get('orgId')) {",
+									"        pm.collectionVariables.set('orgId', res.data[0].id);",
+									"        console.log('Saved first workspace ID to orgId: ' + res.data[0].id);",
+									"    }",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/users/organizations",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"users",
+								"organizations"
+							]
+						},
+						"description": "Lists all workspaces belonging to the authenticated user."
+					},
+					"response": []
+				},
+				{
+					"name": "Create Organization",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 201) {",
+									"    var res = pm.response.json();",
+									"    if (res.data && res.data.id) {",
+									"        pm.collectionVariables.set('orgId', res.data.id);",
+									"        console.log('Saved created workspace ID to orgId: ' + res.data.id);",
+									"    }",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"name\": \"Platform Core Team\",\n    \"slug\": \"platform-core-team\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/users/organizations",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"users",
+								"organizations"
+							]
+						},
+						"description": "Creates a new multi-tenant organization workspace with caller as owner."
+					},
+					"response": []
+				},
+				{
+					"name": "Get Organization Details",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/users/organizations/{{orgId}}",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"users",
+								"organizations",
+								"{{orgId}}"
+							]
+						},
+						"description": "Returns organization details, member count, and caller's role."
+					},
+					"response": []
+				},
+				{
+					"name": "List Organization Members",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/users/organizations/{{orgId}}/members",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"users",
+								"organizations",
+								"{{orgId}}",
+								"members"
+							]
+						},
+						"description": "Lists members and roles for an organization workspace."
+					},
+					"response": []
+				},
+				{
+					"name": "Add Member Directly",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"email\": \"teammate@adroit.run\",\n    \"role\": \"admin\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/users/organizations/{{orgId}}/members",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"users",
+								"organizations",
+								"{{orgId}}",
+								"members"
+							]
+						},
+						"description": "Directly adds an existing registered user to the workspace with specified role."
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "5. Organization Invitations",
+			"item": [
+				{
+					"name": "Create Organization Invitation",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 201) {",
+									"    var res = pm.response.json();",
+									"    if (res.data) {",
+									"        if (res.data.token) {",
+									"            pm.collectionVariables.set('inviteToken', res.data.token);",
+									"            console.log('Saved invitation token to inviteToken');",
+									"        }",
+									"        if (res.data.id) {",
+									"            pm.collectionVariables.set('inviteId', res.data.id);",
+									"            console.log('Saved invitation ID to inviteId: ' + res.data.id);",
+									"        }",
+									"    }",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"email\": \"colleague@adroit.run\",\n    \"role\": \"admin\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/users/organizations/{{orgId}}/invitations",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"users",
+								"organizations",
+								"{{orgId}}",
+								"invitations"
+							]
+						},
+						"description": "Creates an invitation and cryptographic token for a colleague."
+					},
+					"response": []
+				},
+				{
+					"name": "List Pending Invitations",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/users/organizations/{{orgId}}/invitations",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"users",
+								"organizations",
+								"{{orgId}}",
+								"invitations"
+							]
+						},
+						"description": "Lists all pending invitations for the organization workspace."
+					},
+					"response": []
+				},
+				{
+					"name": "Preview Invitation (Public)",
+					"request": {
+						"auth": {
+							"type": "noauth"
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/users/invitations/{{inviteToken}}",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"users",
+								"invitations",
+								"{{inviteToken}}"
+							]
+						},
+						"description": "Public preview of workspace invitation details."
+					},
+					"response": []
+				},
+				{
+					"name": "Accept Invitation",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/users/invitations/{{inviteToken}}/accept",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"users",
+								"invitations",
+								"{{inviteToken}}",
+								"accept"
+							]
+						},
+						"description": "Accepts an invitation using the bearer token of the recipient user."
+					},
+					"response": []
+				},
+				{
+					"name": "Revoke Invitation",
+					"request": {
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/users/organizations/{{orgId}}/invitations/{{inviteId}}",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"users",
+								"organizations",
+								"{{orgId}}",
+								"invitations",
+								"{{inviteId}}"
+							]
+						},
+						"description": "Revokes a pending invitation so it can no longer be accepted."
+					},
+					"response": []
+				}
+			]
+		}
+	]
+}
