@@ -36,21 +36,20 @@ func main() {
 		slog.Int("port", baseCfg.Port),
 	)
 
-	// 2. Database Connection (with in-memory fallback for local standalone testing)
-	var repo authservice.Repository
+	// 2. Database Connection (strict requirement - fail fast if unreachable)
 	dbCfg := database.LoadConfig()
-	dbCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	dbCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	db, err := database.Connect(dbCtx, dbCfg)
 	if err != nil {
-		log.Warn("PostgreSQL connection failed; running with in-memory repository", slog.String("error", err.Error()))
-		repo = authservice.NewMemoryRepository()
-	} else {
-		log.Info("Connected to PostgreSQL successfully")
-		defer db.Close()
-		repo = authservice.NewPostgresRepository(db)
+		log.Error("Failed to connect to PostgreSQL", slog.String("error", err.Error()))
+		os.Exit(1)
 	}
+	defer db.Close()
+	log.Info("Connected to PostgreSQL successfully")
+
+	repo := authservice.NewPostgresRepository(db)
 
 	// 3. Service & Handlers
 	svc := authservice.NewService(repo, jwtSecret, jwtExpiration)

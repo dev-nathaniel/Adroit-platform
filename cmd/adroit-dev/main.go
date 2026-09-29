@@ -77,23 +77,27 @@ func main() {
 	}
 	fmt.Printf("%s==========================================================================%s\n", colorCyan, colorReset)
 
-	// Pre-flight: Check database and run pending migrations if reachable
+	// Pre-flight: Verify PostgreSQL connectivity & apply pending migrations
 	dbCfg := database.LoadConfig()
-	dbCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	dbCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	dbConn, err := database.Connect(dbCtx, dbCfg)
 	cancel()
-	if err == nil {
-		_ = dbConn.Close()
-		fmt.Print("   -> PostgreSQL detected. Checking database migrations ... ")
-		if err := database.MigrateUp(dbCfg.DSN(), migrations.FS); err != nil {
-			fmt.Printf("%sWARNING%s (%v)\n", colorYellow, colorReset, err)
-		} else {
-			v, _, _ := database.MigrateVersion(dbCfg.DSN(), migrations.FS)
-			fmt.Printf("%sDONE%s (v%d)\n", colorGreen, colorReset, v)
-		}
-	} else {
-		fmt.Printf("   -> PostgreSQL not detected; services will fallback to in-memory mode.\n")
+	if err != nil {
+		fmt.Println()
+		fmt.Printf("%s[ERROR] PostgreSQL is not running or unreachable: %v%s\n", colorRed, err, colorReset)
+		fmt.Printf("%sPlease start the backing infrastructure first:%s\n", colorYellow, colorReset)
+		fmt.Printf("   %sdocker compose -f deployments/docker-compose.dev.yml up -d%s\n\n", colorBold, colorReset)
+		os.Exit(1)
 	}
+	_ = dbConn.Close()
+
+	fmt.Print("   -> PostgreSQL connected. Running database migrations ... ")
+	if err := database.MigrateUp(dbCfg.DSN(), migrations.FS); err != nil {
+		fmt.Printf("%sFAILED%s (%v)\n", colorRed, colorReset, err)
+		os.Exit(1)
+	}
+	v, _, _ := database.MigrateVersion(dbCfg.DSN(), migrations.FS)
+	fmt.Printf("%sDONE%s (v%d)\n", colorGreen, colorReset, v)
 
 	fmt.Println("   Compiling services...")
 

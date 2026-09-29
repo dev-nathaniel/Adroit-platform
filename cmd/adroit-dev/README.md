@@ -77,7 +77,7 @@ go build -o bin/adroit-dev.exe ./cmd/adroit-dev
 [API Gateway] {"time":"...","level":"INFO","msg":"Mounted proxy for user-service","target":"http://localhost:8082"}
 ```
 
-> **Note on Migrations:** `adroit-dev` automatically checks your local PostgreSQL instance on startup. If Postgres is running (via `docker compose -f deployments/docker-compose.dev.yml up -d`), it applies all pending migrations from `deployments/migrations` before building and booting the services. If Postgres is offline, services start cleanly using an in-memory repository fallback.
+> **Prerequisite:** Start the local infrastructure first via `docker compose -f deployments/docker-compose.dev.yml up -d`. On startup, `adroit-dev` verifies PostgreSQL availability, runs all pending migrations from `deployments/migrations`, and only then launches the services. If PostgreSQL is offline, `adroit-dev` fails fast with an informative error rather than risking silent data loss.
 
 ---
 
