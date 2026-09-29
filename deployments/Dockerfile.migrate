@@ -1,0 +1,27 @@
+# ==============================================================================
+# Adroit Platform — Production Migration Runner Container
+# ==============================================================================
+
+FROM golang:1.24-alpine AS builder
+
+WORKDIR /app
+
+# Dependencies
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Source code
+COPY . .
+
+# Compile self-contained migration binary (embedded SQL migrations)
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /bin/migrate ./cmd/migrate
+
+# Minimal production image
+FROM alpine:3.19
+
+RUN apk --no-cache add ca-certificates tzdata
+
+COPY --from=builder /bin/migrate /usr/local/bin/migrate
+
+ENTRYPOINT ["/usr/local/bin/migrate"]
+CMD ["up"]

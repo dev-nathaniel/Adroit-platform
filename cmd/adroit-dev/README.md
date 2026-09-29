@@ -16,6 +16,7 @@ The **Adroit Process Supervisor** is a cross-platform (Windows, macOS, Linux) lo
        (:8081)                   (:8082)                   (:8080)
 ```
 
+0. **Pre-flight Database Migrations:** Checks PostgreSQL availability and automatically applies any pending migrations (`golang-migrate`) using embedded SQL scripts before compiling services.
 1. **Auto-Compiles Actual Code:** Builds `./cmd/auth-service`, `./cmd/user-service`, and `./cmd/api-gateway` to the local `bin/` directory.
 2. **Spawns Child Processes:** Launches each microservice binary on its configured port.
 3. **Pipes and Prefixes Logs:** Colors and prefixes every log line:
@@ -38,8 +39,12 @@ The **Adroit Process Supervisor** is a cross-platform (Windows, macOS, Linux) lo
 
 ## 3. How to Run Locally
 
-### Build and Launch Supervisor (Cross-Platform)
+### Quick Run
+```powershell
+go run ./cmd/adroit-dev
+```
 
+### Or Build and Launch (Cross-Platform)
 ```powershell
 go build -o bin/adroit-dev.exe ./cmd/adroit-dev
 ./bin/adroit-dev.exe
@@ -56,6 +61,7 @@ go build -o bin/adroit-dev.exe ./cmd/adroit-dev
    * User Service     http://localhost:8082  (./cmd/user-service)
    * API Gateway      http://localhost:8080  (./cmd/api-gateway)
 ==========================================================================
+   -> PostgreSQL detected. Checking database migrations ... DONE (v1)
    Compiling services...
    -> Building Auth Service (./cmd/auth-service) ... DONE
    -> Building User Service (./cmd/user-service) ... DONE
@@ -70,6 +76,8 @@ go build -o bin/adroit-dev.exe ./cmd/adroit-dev
 [API Gateway] {"time":"...","level":"INFO","msg":"Mounted proxy for auth-service","target":"http://localhost:8081"}
 [API Gateway] {"time":"...","level":"INFO","msg":"Mounted proxy for user-service","target":"http://localhost:8082"}
 ```
+
+> **Note on Migrations:** `adroit-dev` automatically checks your local PostgreSQL instance on startup. If Postgres is running (via `docker compose -f deployments/docker-compose.dev.yml up -d`), it applies all pending migrations from `deployments/migrations` before building and booting the services. If Postgres is offline, services start cleanly using an in-memory repository fallback.
 
 ---
 

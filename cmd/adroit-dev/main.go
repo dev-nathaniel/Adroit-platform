@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -11,6 +12,10 @@ import (
 	"runtime"
 	"sync"
 	"syscall"
+	"time"
+
+	"github.com/dev-nathaniel/Adroit-platform/deployments/migrations"
+	"github.com/dev-nathaniel/Adroit-platform/pkg/database"
 )
 
 // ANSI Color Codes
@@ -71,6 +76,25 @@ func main() {
 		fmt.Printf("   * %s%-16s%s http://localhost:%d  (%s)\n", s.Color, s.Name, colorReset, s.Port, s.Pkg)
 	}
 	fmt.Printf("%s==========================================================================%s\n", colorCyan, colorReset)
+
+	// Pre-flight: Check database and run pending migrations if reachable
+	dbCfg := database.LoadConfig()
+	dbCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	dbConn, err := database.Connect(dbCtx, dbCfg)
+	cancel()
+	if err == nil {
+		_ = dbConn.Close()
+		fmt.Print("   -> PostgreSQL detected. Checking database migrations ... ")
+		if err := database.MigrateUp(dbCfg.DSN(), migrations.FS); err != nil {
+			fmt.Printf("%sWARNING%s (%v)\n", colorYellow, colorReset, err)
+		} else {
+			v, _, _ := database.MigrateVersion(dbCfg.DSN(), migrations.FS)
+			fmt.Printf("%sDONE%s (v%d)\n", colorGreen, colorReset, v)
+		}
+	} else {
+		fmt.Printf("   -> PostgreSQL not detected; services will fallback to in-memory mode.\n")
+	}
+
 	fmt.Println("   Compiling services...")
 
 	// 1. Build all services

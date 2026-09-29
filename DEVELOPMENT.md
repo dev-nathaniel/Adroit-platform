@@ -25,6 +25,7 @@ Adroit-platform/
 │   ├── git-integration-service/     # Git Integration Service entrypoint
 │   ├── log-service/                 # Logging & Streaming Service entrypoint
 │   ├── managed-database-service/    # Managed Database Service entrypoint
+│   ├── migrate/                     # Standalone Production Database Migration CLI
 │   ├── notification-service/        # Notification & Webhook Service entrypoint
 │   ├── orchestration-service/       # Nomad Orchestration Service entrypoint
 │   ├── project-service/             # Project & Environment Service entrypoint
@@ -121,6 +122,11 @@ Adroit-platform/
    - **Current Pattern (In-Memory Token Bucket):** Implemented in `pkg/middleware/ratelimit.go` using a thread-safe token bucket algorithm with per-IP tracking and background cleanup. Optimal for local development and single-instance deployments (zero external latency, zero dependencies).
    - **[TODO] Multi-Node Distributed Limiter (Redis Cluster):** In multi-node production deployments where multiple API Gateway replicas run behind the Edge Load Balancer, rate limits will be synchronized globally across nodes via the **Redis Cluster** (already provisioned in `deployments/docker-compose.dev.yml`). This also enables customer-tier rate quotas (e.g. Free: 100 req/min, Pro: 5,000 req/min).
 
+8. **Database Migrations Architecture:**
+   - **Engine:** Powered by `golang-migrate` with embedded SQL filesystem (`deployments/migrations/migrations.go`) and PostgreSQL advisory locking.
+   - **Local Development:** `cmd/adroit-dev` automatically checks PostgreSQL and applies pending migrations on boot. Direct inspection and rollbacks are available via `go run ./cmd/migrate [up|down|version|force]`.
+   - **Production:** Packaged into a minimal container via `deployments/Dockerfile.migrate` and executed as an isolated pre-deployment batch job in Nomad (`deployments/nomad/adroit-migrate.nomad.hcl`) before rolling out microservice updates.
+
 ---
 
 ## 3. Implementation Progress Tracker
@@ -138,7 +144,7 @@ Adroit-platform/
 | | Shared `pkg/config` | Completed | 12-factor configuration loader with typed getters and fallback defaults. |
 | | Local Backing Services | Completed | `docker-compose.dev.yml` for Postgres, Redis, NATS (JetStream), Consul, Caddy. |
 | | API Gateway Entrypoint | Completed | `cmd/api-gateway/main.go` implemented and verified compiling with Chi router. |
-| **Phase 2: Core Microservices** | PostgreSQL Schema & Migrations | Completed | Migration DDL (`001_init_schema.up.sql`) and connection pool in `pkg/database`. |
+| **Phase 2: Core Microservices** | PostgreSQL Schema & Migrations | Completed | Migration DDL (`001_init_schema.{up,down}.sql`), embedded FS, standalone `cmd/migrate` runner (golang-migrate), Nomad batch job, and auto-preflight in `adroit-dev`. |
 | | Identity & Crypto Primitives | Completed | `pkg/identity` for bcrypt password hashing (cost 12) and HMAC-SHA256 JWT tokens. |
 | | Auth Service | Completed | `internal/auth-service` & `cmd/auth-service`: Register, Login, Me, auto-workspace creation, rate limiting. |
 | | User & Organization Service | Completed | `internal/user-service` & `cmd/user-service`: User profiles, multi-tenant orgs, team memberships & RBAC. |

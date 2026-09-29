@@ -8,7 +8,7 @@ The `database` package manages pooled PostgreSQL connections using `pgx/v5/stdli
 
 * **High Performance Pooling:** Configurable `MaxOpenConns`, `MaxIdleConns`, and `ConnMaxLifetime`.
 * **Standard DSN Builder:** Formats connection URIs with SSL modes.
-* **Migration Runner:** Executes `.sql` migration files to bootstrap database schemas.
+* **Migration Engine (`MigrateUp`, `MigrateDown`, `MigrateVersion`, `MigrateForce`):** Powered by `golang-migrate` with embedded filesystem (`io/fs`) drivers and PostgreSQL advisory locking.
 * **Health Check:** `PingContext` with timeout ensures database availability.
 
 ---
@@ -29,8 +29,51 @@ The `database` package manages pooled PostgreSQL connections using `pgx/v5/stdli
 
 ---
 
-## 3. How to Test
+## 3. Database Migrations
+
+The platform uses `golang-migrate` with embedded `.sql` scripts located in `deployments/migrations`.
+
+### Programmatic API:
+```go
+import (
+    "github.com/dev-nathaniel/Adroit-platform/deployments/migrations"
+    "github.com/dev-nathaniel/Adroit-platform/pkg/database"
+)
+
+// Apply all pending migrations
+err := database.MigrateUp(dsn, migrations.FS)
+
+// Roll back 1 step (or pass 0 to roll back all)
+err := database.MigrateDown(dsn, migrations.FS, 1)
+
+// Query active version
+version, dirty, err := database.MigrateVersion(dsn, migrations.FS)
+
+// Clear dirty state / force version
+err := database.MigrateForce(dsn, migrations.FS, 1)
+```
+
+### CLI Commands:
+For standalone execution, use the dedicated CLI runner in [`cmd/migrate`](../../cmd/migrate/README.md):
+```bash
+# Run all pending migrations
+go run ./cmd/migrate up
+
+# Check current version and clean/dirty state
+go run ./cmd/migrate version
+
+# Roll back 1 migration step
+go run ./cmd/migrate down 1
+
+# Reset dirty state or force a version
+go run ./cmd/migrate force 1
+```
+
+---
+
+## 4. How to Test
 
 ```bash
 go test -v ./pkg/database
 ```
+
