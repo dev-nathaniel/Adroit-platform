@@ -2,8 +2,12 @@ package userservice
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"net/mail"
 	"regexp"
 	"strings"
 	"time"
@@ -14,9 +18,10 @@ import (
 )
 
 var (
-	ErrOrgNameRequired = errors.New("organization name is required")
-	ErrInvalidRole     = errors.New("role must be 'admin' or 'member'")
+	ErrOrgNameRequired  = errors.New("organization name is required")
+	ErrInvalidRole      = errors.New("role must be 'admin' or 'member'")
 	ErrPermissionDenied = errors.New("only owners and admins can invite members")
+	ErrInvalidEmail     = errors.New("invalid email address")
 )
 
 // Service defines user and organization business logic
@@ -137,6 +142,210 @@ func (s *Service) ListMembers(ctx context.Context, callerID, orgID string) ([]Or
 	}
 	return s.repo.ListOrgMembers(ctx, orgID)
 }
+
+// CreateInvitation creates a secure pending invitation to an organization
+func (s *Service) CreateInvitation(ctx context.Context, callerID, orgID string, req CreateInvitationRequest) (*InvitationResponse, error) {
+	callerRole, err := s.repo.GetMemberRole(ctx, orgID, callerID)
+	if err != nil || (callerRole != "owner" && callerRole != "admin") {
+		return nil, ErrPermissionDenied
+	}
+
+	role := strings.ToLower(strings.TrimSpace(req.Role))
+	if role != "admin" && role != "member" {
+		return nil, ErrInvalidRole
+	}
+
+	email := strings.ToLower(strings.TrimSpace(req.Email))
+	if _, err := mail.ParseAddress(email); err != nil {
+		return nil, ErrInvalidEmail
+	}
+
+	// Verify organization exists
+	if _, err := s.repo.GetOrganization(ctx, orgID); err != nil {
+		return nil, err
+	}
+
+	// Check if user already exists and is already a member
+	if existingUser, err := s.repo.GetUserByEmail(ctx, email); err == nil && existingUser != nil {
+		if _, err := s.repo.GetMemberRole(ctx, orgID, existingUser.ID); err == nil {
+			return nil, ErrAlreadyMember
+		}
+	}
+
+	// Check if active pending invitation already exists for this email in this org
+	if _, err := s.repo.GetPendingInvitationByEmail(ctx, orgID, email); err == nil {
+		return nil, ErrPendingInvitationExists
+	}
+
+	rawToken, tokenHash, err := generateInviteToken()
+	if err != nil {
+		return nil, err
+	}
+
+	now := time.Now().UTC()
+	invitation := &types.OrganizationInvitation{
+		ID:             uuid.New().String(),
+		OrganizationID: orgID,
+		Email:          email,
+		Role:           role,
+		InvitedBy:      callerID,
+		Status:         types.InvitationStatusPending,
+		ExpiresAt:      now.Add(7 * 24 * time.Hour), // 7-day expiration window
+		CreatedAt:      now,
+	}
+
+	if err := s.repo.CreateInvitation(ctx, invitation, tokenHash); err != nil {
+		return nil, fmt.Errorf("failed to save invitation: %w", err)
+	}
+
+	return &InvitationResponse{
+		OrganizationInvitation: *invitation,
+		Token:                  rawToken,
+		InviteURL:              "/invite?token=" + rawToken,
+	}, nil
+}
+
+// GetInvitationPreview retrieves public information about an invitation using the raw token
+func (s *Service) GetInvitationPreview(ctx context.Context, rawToken string) (*InvitationPreview, error) {
+	rawToken = strings.TrimSpace(rawToken)
+	if rawToken == "" {
+		return nil, ErrInvalidInvitation
+	}
+
+	tokenHash := hashInviteToken(rawToken)
+	inv, err := s.repo.GetInvitationByTokenHash(ctx, tokenHash)
+	if err != nil {
+		return nil, ErrInvalidInvitation
+	}
+
+	if inv.Status != types.InvitationStatusPending {
+		return nil, ErrInvalidInvitation
+	}
+
+	if time.Now().UTC().After(inv.ExpiresAt) {
+		_ = s.repo.UpdateInvitationStatus(ctx, inv.ID, types.InvitationStatusExpired)
+		return nil, ErrInvitationExpired
+	}
+
+	org, err := s.repo.GetOrganization(ctx, inv.OrganizationID)
+	if err != nil {
+		return nil, err
+	}
+
+	invitedByName := "Workspace Admin"
+	if inviter, err := s.repo.GetUser(ctx, inv.InvitedBy); err == nil && inviter != nil {
+		invitedByName = inviter.Name
+	}
+
+	return &InvitationPreview{
+		ID:               inv.ID,
+		OrganizationID:   org.ID,
+		OrganizationName: org.Name,
+		Email:            inv.Email,
+		Role:             inv.Role,
+		InvitedByName:    invitedByName,
+		ExpiresAt:        inv.ExpiresAt,
+	}, nil
+}
+
+// AcceptInvitation allows an authenticated user whose email matches the invite to join the org
+func (s *Service) AcceptInvitation(ctx context.Context, userID, rawToken string) (*AcceptInvitationResponse, error) {
+	user, err := s.repo.GetUser(ctx, userID)
+	if err != nil {
+		return nil, ErrNotFound
+	}
+
+	rawToken = strings.TrimSpace(rawToken)
+	if rawToken == "" {
+		return nil, ErrInvalidInvitation
+	}
+
+	tokenHash := hashInviteToken(rawToken)
+	inv, err := s.repo.GetInvitationByTokenHash(ctx, tokenHash)
+	if err != nil {
+		return nil, ErrInvalidInvitation
+	}
+
+	if inv.Status != types.InvitationStatusPending {
+		return nil, ErrInvalidInvitation
+	}
+
+	if time.Now().UTC().After(inv.ExpiresAt) {
+		_ = s.repo.UpdateInvitationStatus(ctx, inv.ID, types.InvitationStatusExpired)
+		return nil, ErrInvitationExpired
+	}
+
+	// Security: Caller's registered email must match the invitation's destination email
+	if !strings.EqualFold(strings.TrimSpace(user.Email), strings.TrimSpace(inv.Email)) {
+		return nil, ErrInvitationEmailMismatch
+	}
+
+	// Add member to org
+	if err := s.repo.AddOrgMember(ctx, inv.OrganizationID, user.ID, inv.Role); err != nil {
+		return nil, fmt.Errorf("failed to join organization: %w", err)
+	}
+
+	// Mark invitation accepted
+	if err := s.repo.UpdateInvitationStatus(ctx, inv.ID, types.InvitationStatusAccepted); err != nil {
+		return nil, fmt.Errorf("failed to update invitation status: %w", err)
+	}
+
+	org, err := s.repo.GetOrganization(ctx, inv.OrganizationID)
+	orgName := ""
+	if err == nil && org != nil {
+		orgName = org.Name
+	}
+
+	return &AcceptInvitationResponse{
+		OrganizationID:   inv.OrganizationID,
+		OrganizationName: orgName,
+		Role:             inv.Role,
+		Message:          fmt.Sprintf("Successfully joined %s as %s", orgName, inv.Role),
+	}, nil
+}
+
+// ListInvitations lists pending invitations for an organization (admin/owner only)
+func (s *Service) ListInvitations(ctx context.Context, callerID, orgID string) ([]types.OrganizationInvitation, error) {
+	callerRole, err := s.repo.GetMemberRole(ctx, orgID, callerID)
+	if err != nil || (callerRole != "owner" && callerRole != "admin") {
+		return nil, ErrPermissionDenied
+	}
+	return s.repo.ListOrgInvitations(ctx, orgID)
+}
+
+// RevokeInvitation revokes a pending invitation (admin/owner only)
+func (s *Service) RevokeInvitation(ctx context.Context, callerID, orgID, invitationID string) error {
+	callerRole, err := s.repo.GetMemberRole(ctx, orgID, callerID)
+	if err != nil || (callerRole != "owner" && callerRole != "admin") {
+		return ErrPermissionDenied
+	}
+
+	inv, err := s.repo.GetInvitation(ctx, invitationID)
+	if err != nil {
+		return err
+	}
+	if inv.OrganizationID != orgID {
+		return ErrNotFound
+	}
+
+	return s.repo.UpdateInvitationStatus(ctx, invitationID, types.InvitationStatusRevoked)
+}
+
+func generateInviteToken() (string, string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", "", fmt.Errorf("failed to generate random token: %w", err)
+	}
+	token := hex.EncodeToString(b)
+	hash := hashInviteToken(token)
+	return token, hash, nil
+}
+
+func hashInviteToken(token string) string {
+	h := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(h[:])
+}
+
 
 var nonAlphaNumRegex = regexp.MustCompile(`[^a-z0-9]+`)
 

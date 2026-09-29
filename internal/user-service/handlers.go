@@ -22,18 +22,30 @@ func NewHandler(service *Service) *Handler {
 
 // RegisterRoutes registers endpoints onto a Chi router
 func (h *Handler) RegisterRoutes(r chi.Router, jwtSecret string) {
-	r.Use(middleware.RequireAuth(jwtSecret))
+	// Public Routes (no authentication required)
+	r.Get("/invitations/{token}", h.HandleGetInvitationPreview)
 
-	// User Profile
-	r.Get("/profile", h.HandleGetProfile)
-	r.Patch("/profile", h.HandleUpdateProfile)
+	// Protected Routes (requires valid JWT token)
+	r.Group(func(auth chi.Router) {
+		auth.Use(middleware.RequireAuth(jwtSecret))
 
-	// Organizations
-	r.Get("/organizations", h.HandleListOrganizations)
-	r.Post("/organizations", h.HandleCreateOrganization)
-	r.Get("/organizations/{orgID}", h.HandleGetOrganization)
-	r.Post("/organizations/{orgID}/members", h.HandleAddMember)
-	r.Get("/organizations/{orgID}/members", h.HandleListMembers)
+		// User Profile
+		auth.Get("/profile", h.HandleGetProfile)
+		auth.Patch("/profile", h.HandleUpdateProfile)
+
+		// Organizations
+		auth.Get("/organizations", h.HandleListOrganizations)
+		auth.Post("/organizations", h.HandleCreateOrganization)
+		auth.Get("/organizations/{orgID}", h.HandleGetOrganization)
+		auth.Post("/organizations/{orgID}/members", h.HandleAddMember)
+		auth.Get("/organizations/{orgID}/members", h.HandleListMembers)
+
+		// Invitations
+		auth.Post("/organizations/{orgID}/invitations", h.HandleCreateInvitation)
+		auth.Get("/organizations/{orgID}/invitations", h.HandleListInvitations)
+		auth.Delete("/organizations/{orgID}/invitations/{inviteID}", h.HandleRevokeInvitation)
+		auth.Post("/invitations/{token}/accept", h.HandleAcceptInvitation)
+	})
 }
 
 // HandleGetProfile returns the caller's profile
@@ -172,3 +184,120 @@ func (h *Handler) HandleListMembers(w http.ResponseWriter, r *http.Request) {
 	}
 	response.JSON(w, http.StatusOK, members)
 }
+
+// HandleCreateInvitation creates a pending workspace invitation
+func (h *Handler) HandleCreateInvitation(w http.ResponseWriter, r *http.Request) {
+	callerID := middleware.GetUserID(r.Context())
+	orgID := chi.URLParam(r, "orgID")
+
+	var req CreateInvitationRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.BadRequest(w, "Invalid request body", nil)
+		return
+	}
+
+	invitation, err := h.service.CreateInvitation(r.Context(), callerID, orgID, req)
+	if err != nil {
+		switch err {
+		case ErrPermissionDenied:
+			response.Forbidden(w, err.Error())
+		case ErrInvalidRole, ErrInvalidEmail:
+			response.BadRequest(w, err.Error(), nil)
+		case ErrAlreadyMember, ErrPendingInvitationExists:
+			response.Conflict(w, err.Error(), nil)
+		case ErrNotFound:
+			response.NotFound(w, "Organization not found")
+		default:
+			response.InternalServerError(w, err.Error())
+		}
+		return
+	}
+
+	response.JSON(w, http.StatusCreated, invitation)
+}
+
+// HandleGetInvitationPreview returns public preview details for an invite token
+func (h *Handler) HandleGetInvitationPreview(w http.ResponseWriter, r *http.Request) {
+	token := chi.URLParam(r, "token")
+
+	preview, err := h.service.GetInvitationPreview(r.Context(), token)
+	if err != nil {
+		switch err {
+		case ErrInvalidInvitation:
+			response.NotFound(w, "Invitation is invalid or has already been used")
+		case ErrInvitationExpired:
+			response.Error(w, http.StatusGone, "INVITATION_EXPIRED", "This invitation link has expired", nil)
+		default:
+			response.InternalServerError(w, "Failed to retrieve invitation details")
+		}
+		return
+	}
+
+	response.JSON(w, http.StatusOK, preview)
+}
+
+// HandleAcceptInvitation allows authenticated users to accept an invitation
+func (h *Handler) HandleAcceptInvitation(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r.Context())
+	token := chi.URLParam(r, "token")
+
+	res, err := h.service.AcceptInvitation(r.Context(), userID, token)
+	if err != nil {
+		switch err {
+		case ErrInvalidInvitation:
+			response.NotFound(w, "Invitation is invalid or has already been used")
+		case ErrInvitationExpired:
+			response.Error(w, http.StatusGone, "INVITATION_EXPIRED", "This invitation link has expired", nil)
+		case ErrInvitationEmailMismatch:
+			response.Forbidden(w, "Your account email does not match the invitation email")
+		default:
+			response.InternalServerError(w, err.Error())
+		}
+		return
+	}
+
+	response.JSON(w, http.StatusOK, res)
+}
+
+// HandleListInvitations lists pending invitations for an organization
+func (h *Handler) HandleListInvitations(w http.ResponseWriter, r *http.Request) {
+	callerID := middleware.GetUserID(r.Context())
+	orgID := chi.URLParam(r, "orgID")
+
+	invitations, err := h.service.ListInvitations(r.Context(), callerID, orgID)
+	if err != nil {
+		if err == ErrPermissionDenied {
+			response.Forbidden(w, "Only owners and admins can view pending invitations")
+			return
+		}
+		response.InternalServerError(w, "Failed to list invitations")
+		return
+	}
+
+	response.JSON(w, http.StatusOK, invitations)
+}
+
+// HandleRevokeInvitation revokes a pending workspace invitation
+func (h *Handler) HandleRevokeInvitation(w http.ResponseWriter, r *http.Request) {
+	callerID := middleware.GetUserID(r.Context())
+	orgID := chi.URLParam(r, "orgID")
+	inviteID := chi.URLParam(r, "inviteID")
+
+	if err := h.service.RevokeInvitation(r.Context(), callerID, orgID, inviteID); err != nil {
+		switch err {
+		case ErrPermissionDenied:
+			response.Forbidden(w, "Only owners and admins can revoke invitations")
+		case ErrNotFound:
+			response.NotFound(w, "Invitation not found")
+		default:
+			response.InternalServerError(w, "Failed to revoke invitation")
+		}
+		return
+	}
+
+	response.JSON(w, http.StatusOK, map[string]string{
+		"status":  "success",
+		"message": "Invitation revoked successfully",
+	})
+}
+

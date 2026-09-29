@@ -53,7 +53,7 @@ go test -cover ./internal/user-service
 
 ## 5. Endpoints & Route Reference
 
-All routes require a valid JWT bearer token: `Authorization: Bearer <TOKEN>` (except `/healthz`).
+Routes require a valid JWT bearer token: `Authorization: Bearer <TOKEN>`, except public probes and preview endpoints.
 
 | Method | Endpoint | Description | Roles Required |
 | :--- | :--- | :--- | :--- |
@@ -63,8 +63,13 @@ All routes require a valid JWT bearer token: `Authorization: Bearer <TOKEN>` (ex
 | `GET` | `/api/v1/users/organizations` | List organizations user belongs to | Authenticated |
 | `POST` | `/api/v1/users/organizations` | Create a new organization workspace | Authenticated |
 | `GET` | `/api/v1/users/organizations/{orgID}` | Get workspace details | Org Member |
-| `POST` | `/api/v1/users/organizations/{orgID}/members` | Add teammate to organization | Org Owner or Admin |
+| `POST` | `/api/v1/users/organizations/{orgID}/members` | Directly add teammate to organization | Org Owner or Admin |
 | `GET` | `/api/v1/users/organizations/{orgID}/members` | List members of organization | Org Member |
+| `POST` | `/api/v1/users/organizations/{orgID}/invitations` | Create pending invitation & token | Org Owner or Admin |
+| `GET` | `/api/v1/users/organizations/{orgID}/invitations` | List pending invitations for org | Org Owner or Admin |
+| `DELETE` | `/api/v1/users/organizations/{orgID}/invitations/{inviteID}` | Revoke pending invitation | Org Owner or Admin |
+| `GET` | `/api/v1/users/invitations/{token}` | Preview invitation details (public) | Public |
+| `POST` | `/api/v1/users/invitations/{token}/accept` | Accept invitation & join workspace | Authenticated (email match) |
 
 ### Example cURL Commands
 
@@ -84,10 +89,28 @@ curl -X POST http://localhost:8082/api/v1/users/organizations \
   -d '{"name": "DevOps Engineering"}'
 ```
 
-#### 3. Invite Team Member
+#### 3. Send Organization Invitation
 ```bash
-curl -X POST http://localhost:8082/api/v1/users/organizations/<ORG_ID>/members \
+curl -X POST http://localhost:8082/api/v1/users/organizations/<ORG_ID>/invitations \
   -H "Authorization: Bearer <TOKEN>" \
   -H "Content-Type: application/json" \
   -d '{"email": "colleague@adroit.run", "role": "admin"}'
 ```
+
+#### 4. Preview Invitation (Public)
+```bash
+curl http://localhost:8082/api/v1/users/invitations/<INVITATION_TOKEN>
+```
+
+#### 5. Accept Invitation
+```bash
+curl -X POST http://localhost:8082/api/v1/users/invitations/<INVITATION_TOKEN>/accept \
+  -H "Authorization: Bearer <RECIPIENT_TOKEN>"
+```
+
+#### 6. Revoke Invitation
+```bash
+curl -X DELETE http://localhost:8082/api/v1/users/organizations/<ORG_ID>/invitations/<INVITATION_ID> \
+  -H "Authorization: Bearer <ADMIN_TOKEN>"
+```
+

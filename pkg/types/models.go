@@ -86,6 +86,28 @@ type Organization struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
+// InvitationStatus tracks the lifecycle of an organization invite
+type InvitationStatus string
+
+const (
+	InvitationStatusPending  InvitationStatus = "pending"
+	InvitationStatusAccepted InvitationStatus = "accepted"
+	InvitationStatusRevoked  InvitationStatus = "revoked"
+	InvitationStatusExpired  InvitationStatus = "expired"
+)
+
+// OrganizationInvitation represents a pending or resolved invitation to join a workspace
+type OrganizationInvitation struct {
+	ID             string           `json:"id"`
+	OrganizationID string           `json:"organization_id"`
+	Email          string           `json:"email"`
+	Role           string           `json:"role"`
+	InvitedBy      string           `json:"invited_by"`
+	Status         InvitationStatus `json:"status"`
+	ExpiresAt      time.Time        `json:"expires_at"`
+	CreatedAt      time.Time        `json:"created_at"`
+}
+
 // Project groups services and environments together
 type Project struct {
 	ID             string    `json:"id"`

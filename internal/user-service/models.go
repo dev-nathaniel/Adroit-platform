@@ -40,3 +40,35 @@ type OrgDetail struct {
 	Role        string `json:"user_role"`
 	MemberCount int    `json:"member_count"`
 }
+
+// CreateInvitationRequest holds inputs for inviting someone to an organization
+type CreateInvitationRequest struct {
+	Email string `json:"email"`
+	Role  string `json:"role"` // admin, member
+}
+
+// InvitationResponse is returned when an invitation is created, including the raw token and URL
+type InvitationResponse struct {
+	types.OrganizationInvitation
+	Token     string `json:"token"`
+	InviteURL string `json:"invite_url"`
+}
+
+// InvitationPreview provides public info when an invitee visits the invite link
+type InvitationPreview struct {
+	ID               string    `json:"id"`
+	OrganizationID   string    `json:"organization_id"`
+	OrganizationName string    `json:"organization_name"`
+	Email            string    `json:"email"`
+	Role             string    `json:"role"`
+	InvitedByName    string    `json:"invited_by_name"`
+	ExpiresAt        time.Time `json:"expires_at"`
+}
+
+// AcceptInvitationResponse is returned when an invitation is successfully accepted
+type AcceptInvitationResponse struct {
+	OrganizationID   string `json:"organization_id"`
+	OrganizationName string `json:"organization_name"`
+	Role             string `json:"role"`
+	Message          string `json:"message"`
+}

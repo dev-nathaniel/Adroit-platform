@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -14,10 +15,14 @@ import (
 )
 
 var (
-	ErrNotFound       = errors.New("resource not found")
-	ErrAlreadyExists  = errors.New("resource already exists")
-	ErrUnauthorized   = errors.New("unauthorized action")
-	ErrAlreadyMember  = errors.New("user is already a member of this organization")
+	ErrNotFound                = errors.New("resource not found")
+	ErrAlreadyExists           = errors.New("resource already exists")
+	ErrUnauthorized            = errors.New("unauthorized action")
+	ErrAlreadyMember           = errors.New("user is already a member of this organization")
+	ErrInvalidInvitation       = errors.New("invitation is invalid, expired, or revoked")
+	ErrInvitationExpired       = errors.New("invitation has expired")
+	ErrInvitationEmailMismatch = errors.New("this invitation was sent to a different email address")
+	ErrPendingInvitationExists = errors.New("a pending invitation already exists for this email")
 )
 
 // Repository interface for user and organization operations
@@ -31,6 +36,14 @@ type Repository interface {
 	ListOrgMembers(ctx context.Context, orgID string) ([]OrgMemberInfo, error)
 	GetMemberRole(ctx context.Context, orgID, userID string) (string, error)
 	GetUserByEmail(ctx context.Context, email string) (*types.User, error)
+
+	// Invitation operations
+	CreateInvitation(ctx context.Context, inv *types.OrganizationInvitation, tokenHash string) error
+	GetInvitationByTokenHash(ctx context.Context, tokenHash string) (*types.OrganizationInvitation, error)
+	GetPendingInvitationByEmail(ctx context.Context, orgID, email string) (*types.OrganizationInvitation, error)
+	ListOrgInvitations(ctx context.Context, orgID string) ([]types.OrganizationInvitation, error)
+	UpdateInvitationStatus(ctx context.Context, invitationID string, status types.InvitationStatus) error
+	GetInvitation(ctx context.Context, invitationID string) (*types.OrganizationInvitation, error)
 }
 
 // PostgresRepository implements Repository using PostgreSQL
@@ -180,20 +193,126 @@ func (r *PostgresRepository) GetMemberRole(ctx context.Context, orgID, userID st
 	return role, nil
 }
 
+func (r *PostgresRepository) CreateInvitation(ctx context.Context, inv *types.OrganizationInvitation, tokenHash string) error {
+	query := `INSERT INTO organization_invitations (id, organization_id, email, role, invited_by, token_hash, status, expires_at, created_at)
+	          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`
+	_, err := r.db.ExecContext(ctx, query, inv.ID, inv.OrganizationID, inv.Email, inv.Role, inv.InvitedBy, tokenHash, string(inv.Status), inv.ExpiresAt, inv.CreatedAt)
+	if err != nil {
+		return fmt.Errorf("failed to create invitation: %w", err)
+	}
+	return nil
+}
+
+func (r *PostgresRepository) GetInvitationByTokenHash(ctx context.Context, tokenHash string) (*types.OrganizationInvitation, error) {
+	query := `SELECT id, organization_id, email, role, invited_by, status, expires_at, created_at
+	          FROM organization_invitations WHERE token_hash = $1`
+	var inv types.OrganizationInvitation
+	var status string
+	err := r.db.QueryRowContext(ctx, query, tokenHash).Scan(
+		&inv.ID, &inv.OrganizationID, &inv.Email, &inv.Role, &inv.InvitedBy, &status, &inv.ExpiresAt, &inv.CreatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("failed to get invitation by token: %w", err)
+	}
+	inv.Status = types.InvitationStatus(status)
+	return &inv, nil
+}
+
+func (r *PostgresRepository) GetPendingInvitationByEmail(ctx context.Context, orgID, email string) (*types.OrganizationInvitation, error) {
+	query := `SELECT id, organization_id, email, role, invited_by, status, expires_at, created_at
+	          FROM organization_invitations 
+	          WHERE organization_id = $1 AND email = $2 AND status = 'pending' AND expires_at > CURRENT_TIMESTAMP`
+	var inv types.OrganizationInvitation
+	var status string
+	err := r.db.QueryRowContext(ctx, query, orgID, email).Scan(
+		&inv.ID, &inv.OrganizationID, &inv.Email, &inv.Role, &inv.InvitedBy, &status, &inv.ExpiresAt, &inv.CreatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("failed to check pending invitation: %w", err)
+	}
+	inv.Status = types.InvitationStatus(status)
+	return &inv, nil
+}
+
+func (r *PostgresRepository) ListOrgInvitations(ctx context.Context, orgID string) ([]types.OrganizationInvitation, error) {
+	query := `SELECT id, organization_id, email, role, invited_by, status, expires_at, created_at
+	          FROM organization_invitations 
+	          WHERE organization_id = $1
+	          ORDER BY created_at DESC`
+	rows, err := r.db.QueryContext(ctx, query, orgID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list invitations: %w", err)
+	}
+	defer rows.Close()
+
+	var list []types.OrganizationInvitation
+	for rows.Next() {
+		var inv types.OrganizationInvitation
+		var status string
+		if err := rows.Scan(&inv.ID, &inv.OrganizationID, &inv.Email, &inv.Role, &inv.InvitedBy, &status, &inv.ExpiresAt, &inv.CreatedAt); err != nil {
+			return nil, fmt.Errorf("failed to scan invitation: %w", err)
+		}
+		inv.Status = types.InvitationStatus(status)
+		list = append(list, inv)
+	}
+	return list, nil
+}
+
+func (r *PostgresRepository) UpdateInvitationStatus(ctx context.Context, invitationID string, status types.InvitationStatus) error {
+	query := `UPDATE organization_invitations SET status = $1 WHERE id = $2`
+	res, err := r.db.ExecContext(ctx, query, string(status), invitationID)
+	if err != nil {
+		return fmt.Errorf("failed to update invitation status: %w", err)
+	}
+	rowsAffected, _ := res.RowsAffected()
+	if rowsAffected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (r *PostgresRepository) GetInvitation(ctx context.Context, invitationID string) (*types.OrganizationInvitation, error) {
+	query := `SELECT id, organization_id, email, role, invited_by, status, expires_at, created_at
+	          FROM organization_invitations WHERE id = $1`
+	var inv types.OrganizationInvitation
+	var status string
+	err := r.db.QueryRowContext(ctx, query, invitationID).Scan(
+		&inv.ID, &inv.OrganizationID, &inv.Email, &inv.Role, &inv.InvitedBy, &status, &inv.ExpiresAt, &inv.CreatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("failed to get invitation: %w", err)
+	}
+	inv.Status = types.InvitationStatus(status)
+	return &inv, nil
+}
+
 // MemoryRepository implements Repository in-memory for testing
 type MemoryRepository struct {
-	mu          sync.RWMutex
-	users       map[string]*types.User
-	orgs        map[string]*types.Organization
-	memberships map[string]map[string]string // orgID -> userID -> role
+	mu           sync.RWMutex
+	users        map[string]*types.User
+	orgs         map[string]*types.Organization
+	memberships  map[string]map[string]string // orgID -> userID -> role
+	invites      map[string]*types.OrganizationInvitation // inviteID -> invite
+	inviteHashes map[string]string                        // tokenHash -> inviteID
 }
 
 // NewMemoryRepository initializes an in-memory repository
 func NewMemoryRepository() *MemoryRepository {
 	return &MemoryRepository{
-		users:       make(map[string]*types.User),
-		orgs:        make(map[string]*types.Organization),
-		memberships: make(map[string]map[string]string),
+		users:        make(map[string]*types.User),
+		orgs:         make(map[string]*types.Organization),
+		memberships:  make(map[string]map[string]string),
+		invites:      make(map[string]*types.OrganizationInvitation),
+		inviteHashes: make(map[string]string),
 	}
 }
 
@@ -322,3 +441,75 @@ func (m *MemoryRepository) GetMemberRole(ctx context.Context, orgID, userID stri
 	}
 	return role, nil
 }
+
+func (m *MemoryRepository) CreateInvitation(ctx context.Context, inv *types.OrganizationInvitation, tokenHash string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	copy := *inv
+	m.invites[inv.ID] = &copy
+	m.inviteHashes[tokenHash] = inv.ID
+	return nil
+}
+
+func (m *MemoryRepository) GetInvitationByTokenHash(ctx context.Context, tokenHash string) (*types.OrganizationInvitation, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	id, ok := m.inviteHashes[tokenHash]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	inv, ok := m.invites[id]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	copy := *inv
+	return &copy, nil
+}
+
+func (m *MemoryRepository) GetPendingInvitationByEmail(ctx context.Context, orgID, email string) (*types.OrganizationInvitation, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	now := time.Now().UTC()
+	for _, inv := range m.invites {
+		if inv.OrganizationID == orgID && strings.EqualFold(inv.Email, email) && inv.Status == types.InvitationStatusPending && now.Before(inv.ExpiresAt) {
+			copy := *inv
+			return &copy, nil
+		}
+	}
+	return nil, ErrNotFound
+}
+
+func (m *MemoryRepository) ListOrgInvitations(ctx context.Context, orgID string) ([]types.OrganizationInvitation, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	var list []types.OrganizationInvitation
+	for _, inv := range m.invites {
+		if inv.OrganizationID == orgID {
+			list = append(list, *inv)
+		}
+	}
+	return list, nil
+}
+
+func (m *MemoryRepository) UpdateInvitationStatus(ctx context.Context, invitationID string, status types.InvitationStatus) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	inv, ok := m.invites[invitationID]
+	if !ok {
+		return ErrNotFound
+	}
+	inv.Status = status
+	return nil
+}
+
+func (m *MemoryRepository) GetInvitation(ctx context.Context, invitationID string) (*types.OrganizationInvitation, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	inv, ok := m.invites[invitationID]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	copy := *inv
+	return &copy, nil
+}
+
