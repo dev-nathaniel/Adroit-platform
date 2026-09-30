@@ -44,6 +44,8 @@ servers:
     description: User & Organization Service (Direct Microservice Port)
   - url: http://localhost:8083
     description: Notification Service (Direct Microservice Port)
+  - url: http://localhost:8084
+    description: Project & Service Catalog (Direct Microservice Port)
 
 tags:
   - name: System & Gateway
@@ -58,6 +60,13 @@ tags:
     description: Team invitation lifecycle (create, preview, accept, list, revoke)
   - name: Notifications
     description: Transactional email dispatch, webhook sending, and invitation simulation
+  - name: Projects
+    description: Project workspaces, environments, and project-scoped resources
+  - name: Services
+    description: Workload lifecycle (standalone & in-project services, dynamic project relocation, specifications)
+  - name: Environment Variables
+    description: Secrets and environment configuration variables for services and projects
+
 
 paths:
   # ==========================================
@@ -962,6 +971,577 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponseEnvelope'
 
+  # ==========================================
+  # PROJECTS
+  # ==========================================
+  /api/v1/projects:
+    get:
+      tags:
+        - Projects
+      summary: List Projects
+      description: Returns projects belonging to an organization (or all caller projects if organization_id is omitted).
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: organization_id
+          in: query
+          required: false
+          description: Filter projects by organization UUID
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: List of projects retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectListResponseEnvelope'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+
+    post:
+      tags:
+        - Projects
+      summary: Create Project
+      description: Creates a new project workspace under an organization.
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateProjectRequest'
+      responses:
+        '201':
+          description: Project created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectResponseEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+
+  /api/v1/projects/{id}:
+    get:
+      tags:
+        - Projects
+      summary: Get Project Details
+      description: Returns project metadata along with count and list of active services.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique project UUID
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Project details retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectDetailResponseEnvelope'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+    patch:
+      tags:
+        - Projects
+      summary: Update Project
+      description: Updates mutable project details (name, slug, description).
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Project UUID
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateProjectRequest'
+      responses:
+        '200':
+          description: Project updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectResponseEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+    delete:
+      tags:
+        - Projects
+      summary: Delete Project
+      description: Deletes a project. Attached services are safely converted into standalone services within the organization.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Project UUID
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Project deleted successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponseEnvelope'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /api/v1/projects/{id}/services:
+    get:
+      tags:
+        - Projects
+        - Services
+      summary: List Services in Project
+      description: Returns all services attached to a specific project.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Project UUID
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Services list retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceListResponseEnvelope'
+
+    post:
+      tags:
+        - Projects
+        - Services
+      summary: Create Service in Project
+      description: Creates a new service directly scoped to the specified project.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Project UUID
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateServiceRequest'
+      responses:
+        '201':
+          description: Service created in project successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceResponseEnvelope'
+
+  /api/v1/projects/{id}/env:
+    get:
+      tags:
+        - Projects
+        - Environment Variables
+      summary: List Project Environment Variables
+      description: Returns shared environment variables configured at the project level.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Project UUID
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Project environment variables retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvVarsListResponseEnvelope'
+
+    post:
+      tags:
+        - Projects
+        - Environment Variables
+      summary: Upsert Project Environment Variables
+      description: Batches and upserts project-level environment variables.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Project UUID
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetEnvVarsRequest'
+      responses:
+        '200':
+          description: Environment variables updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvVarsListResponseEnvelope'
+
+  /api/v1/projects/{id}/env/{key}:
+    delete:
+      tags:
+        - Projects
+        - Environment Variables
+      summary: Delete Project Environment Variable
+      description: Removes a configuration key from the project.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Project UUID
+          schema:
+            type: string
+            format: uuid
+        - name: key
+          in: path
+          required: true
+          description: Environment variable key name
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Environment variable removed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponseEnvelope'
+
+  # ==========================================
+  # SERVICES
+  # ==========================================
+  /api/v1/services:
+    get:
+      tags:
+        - Services
+      summary: List Services
+      description: |
+        Lists services within an organization.
+        Supports filtering by specific `project_id`, or `standalone=true` for unassigned workloads.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: organization_id
+          in: query
+          required: true
+          description: Organization UUID
+          schema:
+            type: string
+            format: uuid
+        - name: project_id
+          in: query
+          required: false
+          description: Optional project UUID filter
+          schema:
+            type: string
+            format: uuid
+        - name: standalone
+          in: query
+          required: false
+          description: Set to true to list only standalone services (project_id is null)
+          schema:
+            type: boolean
+      responses:
+        '200':
+          description: Services retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceListResponseEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+
+    post:
+      tags:
+        - Services
+      summary: Create Service
+      description: |
+        Registers a new workload (web service, worker, cron, static site).
+        `project_id` is optional; if omitted or null, the service is created as a standalone workload.
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateServiceRequest'
+      responses:
+        '201':
+          description: Service created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceResponseEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+
+  /api/v1/services/{id}:
+    get:
+      tags:
+        - Services
+      summary: Get Service Details
+      description: Returns service configuration, resource allocations, and project linkage.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Service UUID
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Service details retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceResponseEnvelope'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+    patch:
+      tags:
+        - Services
+      summary: Update Service
+      description: Updates service properties, build commands, replica counts, and resource limits.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Service UUID
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateServiceRequest'
+      responses:
+        '200':
+          description: Service updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceResponseEnvelope'
+
+    delete:
+      tags:
+        - Services
+      summary: Delete Service
+      description: Deletes a service and associated environment configurations.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Service UUID
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Service deleted successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponseEnvelope'
+
+  /api/v1/services/{id}/move:
+    post:
+      tags:
+        - Services
+      summary: Move Service into or out of Project
+      description: |
+        Dynamically moves a service into a target project, moves it between projects,
+        or detaches it into a standalone service (`project_id: null`).
+        Cross-tenant verification ensures the target project belongs to the same organization.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Service UUID
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MoveServiceRequest'
+      responses:
+        '200':
+          description: Service relocated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceResponseEnvelope'
+        '403':
+          description: Target project belongs to a different organization
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+
+  /api/v1/services/{id}/env:
+    get:
+      tags:
+        - Services
+        - Environment Variables
+      summary: List Service Environment Variables
+      description: |
+        Returns environment variables explicitly configured for this service.
+        Provide `?resolved=true` to view fully merged runtime variables (project-level variables inherited, with service-level variables overriding).
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Service UUID
+          schema:
+            type: string
+            format: uuid
+        - name: resolved
+          in: query
+          required: false
+          description: When true, returns merged project + service environment key-value pairs
+          schema:
+            type: boolean
+      responses:
+        '200':
+          description: Environment variables retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvVarsListResponseEnvelope'
+
+    post:
+      tags:
+        - Services
+        - Environment Variables
+      summary: Upsert Service Environment Variables
+      description: Batches and upserts service-level environment variables.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Service UUID
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetEnvVarsRequest'
+      responses:
+        '200':
+          description: Environment variables updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvVarsListResponseEnvelope'
+
+  /api/v1/services/{id}/env/{key}:
+    delete:
+      tags:
+        - Services
+        - Environment Variables
+      summary: Delete Service Environment Variable
+      description: Removes a configuration key from the service.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Service UUID
+          schema:
+            type: string
+            format: uuid
+        - name: key
+          in: path
+          required: true
+          description: Environment variable key name
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Environment variable removed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponseEnvelope'
+
 # ==========================================
 # COMPONENTS & SCHEMAS
 # ==========================================
@@ -972,6 +1552,35 @@ components:
       scheme: bearer
       bearerFormat: JWT
       description: Standard HMAC-SHA256 JWT issued by `/api/v1/auth/login` or `/api/v1/auth/register`.
+
+  responses:
+    BadRequestError:
+      description: Bad Request - The request parameters or body are invalid or malformed
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponseEnvelope'
+
+    UnauthorizedError:
+      description: Unauthorized - Authentication token is missing, invalid, or expired
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponseEnvelope'
+
+    ForbiddenError:
+      description: Forbidden - Caller does not have sufficient permissions
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponseEnvelope'
+
+    NotFoundError:
+      description: Not Found - The requested resource does not exist
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponseEnvelope'
 
   schemas:
     # --- Universal Response Envelopes ---
@@ -1809,3 +2418,439 @@ components:
       required:
         - success
         - data
+
+    # --- Project Schemas ---
+    CreateProjectRequest:
+      type: object
+      required:
+        - organization_id
+        - name
+      properties:
+        organization_id:
+          type: string
+          format: uuid
+          example: "a81d4512-70b9-4929-9e12-3b2d1945f345"
+        name:
+          type: string
+          example: "Core Platform"
+        slug:
+          type: string
+          example: "core-platform"
+        description:
+          type: string
+          example: "Primary backend platform services and workers"
+
+    UpdateProjectRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          example: "Core Platform Updated"
+        slug:
+          type: string
+          example: "core-platform-updated"
+        description:
+          type: string
+          example: "Updated project description"
+
+    Project:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        organization_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        slug:
+          type: string
+        description:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required:
+        - id
+        - organization_id
+        - name
+        - slug
+        - created_at
+        - updated_at
+
+    ProjectDetail:
+      allOf:
+        - $ref: '#/components/schemas/Project'
+        - type: object
+          properties:
+            service_count:
+              type: integer
+              example: 4
+            services:
+              type: array
+              items:
+                $ref: '#/components/schemas/Service'
+
+    ProjectResponseEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          $ref: '#/components/schemas/Project'
+      required:
+        - success
+        - data
+
+    ProjectDetailResponseEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          $ref: '#/components/schemas/ProjectDetail'
+      required:
+        - success
+        - data
+
+    ProjectListResponseEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Project'
+      required:
+        - success
+        - data
+
+    # --- Service Schemas ---
+    CreateServiceRequest:
+      type: object
+      required:
+        - organization_id
+        - name
+        - repo_url
+      properties:
+        organization_id:
+          type: string
+          format: uuid
+        project_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Optional project UUID. If omitted or null, service is created as standalone.
+        name:
+          type: string
+          example: "api-backend"
+        slug:
+          type: string
+          example: "api-backend"
+        type:
+          type: string
+          enum: [web, worker, cron, static_site, private]
+          default: web
+        runtime_tier:
+          type: string
+          enum: [general, isolated, high_memory, gpu]
+          default: general
+        repo_url:
+          type: string
+          example: "https://github.com/my-org/my-api"
+        branch:
+          type: string
+          default: "main"
+        root_directory:
+          type: string
+          example: ""
+        build_command:
+          type: string
+          example: "npm run build"
+        start_command:
+          type: string
+          example: "npm start"
+        dockerfile_path:
+          type: string
+          example: "Dockerfile"
+        port:
+          type: integer
+          default: 8080
+        min_replicas:
+          type: integer
+          default: 1
+        max_replicas:
+          type: integer
+          default: 1
+        cpu_cores:
+          type: number
+          default: 0.5
+        memory_mb:
+          type: integer
+          default: 512
+        disk_mb:
+          type: integer
+          default: 2048
+        health_check_path:
+          type: string
+          default: "/healthz"
+
+    UpdateServiceRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        slug:
+          type: string
+        type:
+          type: string
+          enum: [web, worker, cron, static_site, private]
+        runtime_tier:
+          type: string
+          enum: [general, isolated, high_memory, gpu]
+        repo_url:
+          type: string
+        branch:
+          type: string
+        root_directory:
+          type: string
+        build_command:
+          type: string
+        start_command:
+          type: string
+        dockerfile_path:
+          type: string
+        port:
+          type: integer
+        min_replicas:
+          type: integer
+        max_replicas:
+          type: integer
+        cpu_cores:
+          type: number
+        memory_mb:
+          type: integer
+        disk_mb:
+          type: integer
+        health_check_path:
+          type: string
+
+    MoveServiceRequest:
+      type: object
+      properties:
+        project_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Target project UUID, or null to detach workload into a standalone service
+          example: "a81d4512-70b9-4929-9e12-3b2d1945f345"
+
+    Service:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        organization_id:
+          type: string
+          format: uuid
+        project_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Null for standalone workloads
+        name:
+          type: string
+        slug:
+          type: string
+        type:
+          type: string
+        runtime_tier:
+          type: string
+        repo_url:
+          type: string
+        branch:
+          type: string
+        root_directory:
+          type: string
+        build_command:
+          type: string
+        start_command:
+          type: string
+        dockerfile_path:
+          type: string
+        port:
+          type: integer
+        min_replicas:
+          type: integer
+        max_replicas:
+          type: integer
+        resources:
+          type: object
+          properties:
+            cpu_cores:
+              type: number
+            memory_mb:
+              type: integer
+            disk_mb:
+              type: integer
+        health_check:
+          type: object
+          properties:
+            path:
+              type: string
+            port:
+              type: integer
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required:
+        - id
+        - organization_id
+        - name
+        - slug
+        - type
+        - runtime_tier
+        - repo_url
+        - branch
+        - port
+        - min_replicas
+        - max_replicas
+        - resources
+        - health_check
+        - created_at
+        - updated_at
+
+    ServiceResponseEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          $ref: '#/components/schemas/Service'
+      required:
+        - success
+        - data
+
+    ServiceListResponseEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Service'
+      required:
+        - success
+        - data
+
+    # --- Environment Variable Schemas ---
+    EnvVarItem:
+      type: object
+      required:
+        - key
+        - value
+      properties:
+        key:
+          type: string
+          example: "DATABASE_URL"
+        value:
+          type: string
+          example: "postgres://user:pass@localhost:5432/app"
+        is_secret:
+          type: boolean
+          default: false
+
+    SetEnvVarsRequest:
+      type: object
+      required:
+        - variables
+      properties:
+        variables:
+          type: array
+          items:
+            $ref: '#/components/schemas/EnvVarItem'
+
+    EnvironmentVariable:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        organization_id:
+          type: string
+          format: uuid
+        project_id:
+          type: string
+          format: uuid
+          nullable: true
+        service_id:
+          type: string
+          format: uuid
+          nullable: true
+        key:
+          type: string
+        value:
+          type: string
+        is_secret:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required:
+        - id
+        - organization_id
+        - key
+        - value
+        - is_secret
+        - created_at
+        - updated_at
+
+    EnvVarsListResponseEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/EnvironmentVariable'
+      required:
+        - success
+        - data
+
+    ResolvedEnvResponseEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: object
+          properties:
+            variables:
+              type: object
+              additionalProperties:
+                type: string
+      required:
+        - success
+        - data
+

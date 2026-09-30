@@ -155,9 +155,9 @@ Adroit-platform/
 | | User & Organization Service | Completed | `internal/user-service` & `cmd/user-service`: User profiles, multi-tenant orgs, team memberships & RBAC. |
 | | Notification Service & Event Backbone | Completed | `internal/notification-service`, `cmd/notification-service`, `pkg/events`: NATS JetStream & InMem EventBus, invite email rendering, SMTP & Console providers, signed webhooks with HMAC-SHA256 & backoff. |
 | | API Specifications & Postman | Completed | OpenAPI 3.0.3 (`docs/openapi.yaml`) & Postman Collection v2.1.0 (`docs/adroit-platform.postman_collection.json`) with auto-token chaining. |
-| | All-in-One Dev Runner | Completed | `cmd/adroit-dev`: One-command runner launching Gateway, Auth, User, and Notification services concurrently. |
-| | Project & Service Catalog | Up Next | Defining projects, environments, service resources (vCPU, RAM), and git repos. |
-| | Build Service & Worker | Pending | BuildKit integration and Nomad batch job runner. |
+| | All-in-One Dev Runner | Completed | `cmd/adroit-dev`: One-command runner launching Gateway, Auth, User, Notification, and Project services concurrently. |
+| | Project & Service Catalog | Completed | `internal/project-service` & `cmd/project-service`: Projects, standalone services (`project_id=nil`), moving services into/out of projects (`/services/{id}/move`), hierarchical environment variables, and NATS JetStream event publishing. |
+| | Build Service & Worker | Up Next | BuildKit integration and Nomad batch job runner. |
 | | Orchestration & Runtime | Pending | Nomad driver, allocations, health monitoring. |
 | | Ingress & Caddy Routing | Pending | Dynamic edge reverse proxy routing via Consul. |
 | | Distributed Rate Limiting | **TODO** | Upgrade rate limiting to Redis Cluster backend for multi-node gateway sync. |

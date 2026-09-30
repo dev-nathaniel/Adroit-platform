@@ -40,6 +40,16 @@
 			"key": "inviteId",
 			"value": "",
 			"type": "string"
+		},
+		{
+			"key": "projectId",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "serviceId",
+			"value": "",
+			"type": "string"
 		}
 	],
 	"item": [
@@ -935,6 +945,423 @@
 							]
 						},
 						"description": "Simulates rendering and sending an organization member invitation email."
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "7. Projects",
+			"item": [
+				{
+					"name": "Create Project",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 201) {",
+									"    var res = pm.response.json();",
+									"    if (res.data && res.data.id) {",
+									"        pm.collectionVariables.set('projectId', res.data.id);",
+									"        console.log('Saved project id: ' + res.data.id);",
+									"    }",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"organization_id\": \"{{orgId}}\",\n  \"name\": \"Core Infrastructure\",\n  \"description\": \"Primary microservices workspace\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/projects",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"projects"
+							]
+						},
+						"description": "Creates a new project in the active organization workspace and saves projectId."
+					},
+					"response": []
+				},
+				{
+					"name": "List Projects",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/projects?organization_id={{orgId}}",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"projects"
+							],
+							"query": [
+								{
+									"key": "organization_id",
+									"value": "{{orgId}}"
+								}
+							]
+						},
+						"description": "Lists all projects in the workspace."
+					},
+					"response": []
+				},
+				{
+					"name": "Get Project Details",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/projects/{{projectId}}",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"projects",
+								"{{projectId}}"
+							]
+						},
+						"description": "Returns project details and associated service count."
+					},
+					"response": []
+				},
+				{
+					"name": "List Services in Project",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/projects/{{projectId}}/services",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"projects",
+								"{{projectId}}",
+								"services"
+							]
+						},
+						"description": "Lists all services attached to a specific project."
+					},
+					"response": []
+				},
+				{
+					"name": "Get Project Env Vars",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/projects/{{projectId}}/env",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"projects",
+								"{{projectId}}",
+								"env"
+							]
+						},
+						"description": "Returns shared environment variables configured at the project level."
+					},
+					"response": []
+				},
+				{
+					"name": "Set Project Env Vars",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"variables\": [\n    {\n      \"key\": \"COMMON_LOG_LEVEL\",\n      \"value\": \"info\",\n      \"is_secret\": false\n    },\n    {\n      \"key\": \"SHARED_API_KEY\",\n      \"value\": \"sk_shared_live_999\",\n      \"is_secret\": true\n    }\n  ]\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/projects/{{projectId}}/env",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"projects",
+								"{{projectId}}",
+								"env"
+							]
+						},
+						"description": "Batches and sets project-level environment variables."
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "8. Services",
+			"item": [
+				{
+					"name": "Create Standalone Service",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 201) {",
+									"    var res = pm.response.json();",
+									"    if (res.data && res.data.id) {",
+									"        pm.collectionVariables.set('serviceId', res.data.id);",
+									"        console.log('Saved service id: ' + res.data.id);",
+									"    }",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"organization_id\": \"{{orgId}}\",\n  \"name\": \"Payment Worker\",\n  \"type\": \"worker\",\n  \"repo_url\": \"https://github.com/my-org/payment-worker\",\n  \"branch\": \"main\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/services",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"services"
+							]
+						},
+						"description": "Creates a standalone service (without a project) directly in the organization."
+					},
+					"response": []
+				},
+				{
+					"name": "List Standalone Services",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/services?organization_id={{orgId}}&standalone=true",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"services"
+							],
+							"query": [
+								{
+									"key": "organization_id",
+									"value": "{{orgId}}"
+								},
+								{
+									"key": "standalone",
+									"value": "true"
+								}
+							]
+						},
+						"description": "Lists all standalone services (not inside any project)."
+					},
+					"response": []
+				},
+				{
+					"name": "Get Service Details",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/services/{{serviceId}}",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"services",
+								"{{serviceId}}"
+							]
+						},
+						"description": "Returns full workload configuration, resource limits, and health check settings."
+					},
+					"response": []
+				},
+				{
+					"name": "Move Service into Project",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"project_id\": \"{{projectId}}\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/services/{{serviceId}}/move",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"services",
+								"{{serviceId}}",
+								"move"
+							]
+						},
+						"description": "Dynamically moves a service into a project (with cross-tenant security verification)."
+					},
+					"response": []
+				},
+				{
+					"name": "Detach Service to Standalone",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"project_id\": null\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/services/{{serviceId}}/move",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"services",
+								"{{serviceId}}",
+								"move"
+							]
+						},
+						"description": "Detaches a service from its current project, turning it into a standalone service."
+					},
+					"response": []
+				},
+				{
+					"name": "Set Service Env Vars",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"variables\": [\n    {\n      \"key\": \"PORT\",\n      \"value\": \"8080\",\n      \"is_secret\": false\n    },\n    {\n      \"key\": \"DATABASE_URL\",\n      \"value\": \"postgres://localhost:5432/app\",\n      \"is_secret\": true\n    }\n  ]\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/services/{{serviceId}}/env",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"services",
+								"{{serviceId}}",
+								"env"
+							]
+						},
+						"description": "Sets or updates service-level environment variables."
+					},
+					"response": []
+				},
+				{
+					"name": "Get Resolved Service Env Vars",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/services/{{serviceId}}/env?resolved=true",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"services",
+								"{{serviceId}}",
+								"env"
+							],
+							"query": [
+								{
+									"key": "resolved",
+									"value": "true"
+								}
+							]
+						},
+						"description": "Returns runtime-resolved environment variables (project vars inherited, with service vars overriding)."
+					},
+					"response": []
+				},
+				{
+					"name": "Delete Service",
+					"request": {
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/services/{{serviceId}}",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"services",
+								"{{serviceId}}"
+							]
+						},
+						"description": "Deletes a workload from the platform."
 					},
 					"response": []
 				}

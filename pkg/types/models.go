@@ -138,10 +138,11 @@ type HealthCheckConfig struct {
 	InitialDelaySeconds int    `json:"initial_delay_seconds"` // grace period on startup
 }
 
-// Service represents a workload within a project
+// Service represents a workload within an organization (optionally grouped under a project)
 type Service struct {
 	ID             string            `json:"id"`
-	ProjectID      string            `json:"project_id"`
+	OrganizationID string            `json:"organization_id"`
+	ProjectID      *string           `json:"project_id"`
 	Name           string            `json:"name"`
 	Slug           string            `json:"slug"`
 	Type           ServiceType       `json:"type"`
@@ -160,6 +161,20 @@ type Service struct {
 	CreatedAt      time.Time         `json:"created_at"`
 	UpdatedAt      time.Time         `json:"updated_at"`
 }
+
+// EnvironmentVariable represents a configuration key-value pair scoped to a service or project
+type EnvironmentVariable struct {
+	ID             string    `json:"id"`
+	OrganizationID string    `json:"organization_id"`
+	ProjectID      *string   `json:"project_id,omitempty"`
+	ServiceID      *string   `json:"service_id,omitempty"`
+	Key            string    `json:"key"`
+	Value          string    `json:"value"`
+	IsSecret       bool      `json:"is_secret"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
+}
+
 
 // Build represents an artifact creation task executed by BuildKit
 type Build struct {
