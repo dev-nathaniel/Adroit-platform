@@ -52,10 +52,14 @@ servers:
     description: Build Service (Direct Microservice Port)
   - url: http://localhost:8087
     description: Orchestration & Runtime Service (Direct Microservice Port)
+  - url: http://localhost:8088
+    description: Ingress & DNS Service (Direct Microservice Port)
 
 tags:
   - name: System & Gateway
     description: Gateway health, information, and status probes
+  - name: Ingress & Custom Domains
+    description: Edge reverse proxy dynamic routing, custom domain registration, DNS challenge validation (CNAME/TXT), and SSL/TLS lifecycle
   - name: Deployments & Orchestration
     description: Nomad job translation, rolling/canary/blue-green rollouts, allocation inspection, and instance scaling
   - name: Authentication
@@ -2441,6 +2445,273 @@ paths:
         '404':
           $ref: '#/components/responses/NotFoundError'
 
+  # ==========================================
+  # INGRESS & CUSTOM DOMAINS
+  # ==========================================
+  /api/v1/services/{id}/domains:
+    post:
+      tags:
+        - Ingress & Custom Domains
+      summary: Add Custom Domain to Service
+      description: Registers a new custom domain for a service and generates DNS challenge verification instructions.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Service UUID
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - domain
+              properties:
+                domain:
+                  type: string
+                  example: api.customer.com
+                verification_type:
+                  type: string
+                  enum: [cname, txt]
+                  default: cname
+                is_primary:
+                  type: boolean
+                  default: false
+      responses:
+        '201':
+          description: Custom domain registered successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DomainResponseEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '409':
+          $ref: '#/components/responses/ConflictError'
+
+    get:
+      tags:
+        - Ingress & Custom Domains
+      summary: List Service Domains
+      description: Returns all custom domains registered for a service.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Service UUID
+          schema:
+            type: string
+            format: uuid
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: per_page
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: List of custom domains
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DomainListResponseEnvelope'
+
+  /api/v1/services/{id}/sync-routes:
+    post:
+      tags:
+        - Ingress & Custom Domains
+      summary: Force Synchronize Service Ingress Routes
+      description: Manually triggers Caddy dynamic reverse proxy synchronization for a service and all its verified domains.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Service UUID
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                upstream_url:
+                  type: string
+                  example: 127.0.0.1:8080
+      responses:
+        '200':
+          description: Routes synchronized successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceRouteSyncResponseEnvelope'
+
+  /api/v1/domains/{id}:
+    get:
+      tags:
+        - Ingress & Custom Domains
+      summary: Get Domain Details & DNS Instructions
+      description: Returns custom domain verification status, SSL issuance state, and DNS configuration instructions.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Domain UUID
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Domain details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DomainResponseEnvelope'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+    delete:
+      tags:
+        - Ingress & Custom Domains
+      summary: Delete Custom Domain
+      description: Removes custom domain binding and deprovisions Caddy edge reverse proxy routes.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Domain UUID
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Domain deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponseEnvelope'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /api/v1/domains/{id}/verify:
+    post:
+      tags:
+        - Ingress & Custom Domains
+      summary: Verify Domain DNS Challenge
+      description: Triggers immediate DNS resolution check (CNAME or TXT) against public DNS servers.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Domain UUID
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Domain verified successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VerifyDomainResponseEnvelope'
+        '422':
+          description: DNS verification failed (records not yet propagated or incorrect)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VerifyDomainResponseEnvelope'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /api/v1/domains/{id}/sync:
+    post:
+      tags:
+        - Ingress & Custom Domains
+      summary: Synchronize Domain Route
+      description: Re-synchronizes edge reverse proxy rules in Caddy for a verified domain.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Domain UUID
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                upstream_url:
+                  type: string
+                  example: 10.0.0.1:8080
+      responses:
+        '200':
+          description: Route synchronized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IngressRouteResponseEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /api/v1/ingress/routes:
+    get:
+      tags:
+        - Ingress & Custom Domains
+      summary: List Edge Ingress Routes
+      description: Returns all active dynamic reverse proxy routes configured on the Caddy edge proxy.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: per_page
+          in: query
+          schema:
+            type: integer
+            default: 50
+      responses:
+        '200':
+          description: Active ingress routes
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IngressRouteListResponseEnvelope'
+
 # ==========================================
 # COMPONENTS & SCHEMAS
 # ==========================================
@@ -2476,6 +2747,13 @@ components:
 
     NotFoundError:
       description: Not Found - The requested resource does not exist
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponseEnvelope'
+
+    ConflictError:
+      description: Conflict - The request could not be completed due to a conflict with the current state of the resource
       content:
         application/json:
           schema:
@@ -2531,6 +2809,9 @@ components:
         - per_page
         - total_items
         - total_pages
+
+    PaginationMeta:
+      $ref: '#/components/schemas/Pagination'
 
     MessageResponseEnvelope:
       type: object
@@ -4416,5 +4697,221 @@ components:
       required:
         - success
         - data
+
+    # ----------------------------------------------------
+    # Ingress & Domain Schemas
+    # ----------------------------------------------------
+    CustomDomain:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        service_id:
+          type: string
+          format: uuid
+        domain:
+          type: string
+          example: api.customer.com
+        status:
+          type: string
+          enum: [pending_verification, active, failed_verification]
+          example: active
+        verification_type:
+          type: string
+          enum: [cname, txt]
+          example: cname
+        verification_token:
+          type: string
+          example: adr_verify_a91f8c...
+        is_primary:
+          type: boolean
+          example: true
+        ssl_status:
+          type: string
+          enum: [pending, issuing, active, failed]
+          example: active
+        ssl_error:
+          type: string
+        verified_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    DNSChallengeDetails:
+      type: object
+      properties:
+        domain:
+          type: string
+          example: api.customer.com
+        verification_type:
+          type: string
+          example: cname
+        target_host:
+          type: string
+          example: cname.adroit.run
+        record_name:
+          type: string
+          example: api.customer.com
+        verification_token:
+          type: string
+        status:
+          type: string
+          example: pending_verification
+        instructions:
+          type: string
+          example: Add a CNAME record for 'api.customer.com' pointing to 'cname.adroit.run'.
+
+    DomainResponse:
+      type: object
+      properties:
+        domain:
+          $ref: '#/components/schemas/CustomDomain'
+        challenge_details:
+          $ref: '#/components/schemas/DNSChallengeDetails'
+
+    DomainResponseEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          $ref: '#/components/schemas/DomainResponse'
+      required:
+        - success
+        - data
+
+    DomainListResponseEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/DomainResponse'
+        meta:
+          $ref: '#/components/schemas/Pagination'
+      required:
+        - success
+        - data
+        - meta
+
+    VerifyDomainResponseEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: object
+          properties:
+            verified:
+              type: boolean
+              example: true
+            status:
+              type: string
+              example: active
+            message:
+              type: string
+              example: CNAME points correctly to cname.adroit.run
+            domain:
+              $ref: '#/components/schemas/CustomDomain'
+            challenge_details:
+              $ref: '#/components/schemas/DNSChallengeDetails'
+      required:
+        - success
+        - data
+
+    IngressRoute:
+      type: object
+      properties:
+        id:
+          type: string
+        service_id:
+          type: string
+          format: uuid
+        domain_id:
+          type: string
+          format: uuid
+        host_pattern:
+          type: string
+          example: api.customer.com
+        upstream_url:
+          type: string
+          example: 10.0.0.5:24000
+        is_active:
+          type: boolean
+          example: true
+        last_synced_at:
+          type: string
+          format: date-time
+
+    IngressRouteResponseEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          $ref: '#/components/schemas/IngressRoute'
+      required:
+        - success
+        - data
+
+    IngressRouteListResponseEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/IngressRoute'
+        meta:
+          $ref: '#/components/schemas/Pagination'
+      required:
+        - success
+        - data
+        - meta
+
+    ServiceRouteSyncResponseEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: object
+          properties:
+            service_id:
+              type: string
+              format: uuid
+            upstream_url:
+              type: string
+              example: 127.0.0.1:8080
+            synced_hosts:
+              type: array
+              items:
+                type: string
+            failed_hosts:
+              type: array
+              items:
+                type: string
+            last_synced_at:
+              type: string
+              format: date-time
+      required:
+        - success
+        - data
+
 
 

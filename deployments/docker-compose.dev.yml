@@ -83,6 +83,7 @@ services:
     ports:
       - "80:80"
       - "443:443"
+      - "2019:2019" # Caddy dynamic JSON Admin API
     volumes:
       - caddy_data:/data
       - caddy_config:/config

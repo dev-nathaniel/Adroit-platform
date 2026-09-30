@@ -91,6 +91,13 @@ func main() {
 			Color: colorBlue,
 		},
 		{
+			Name:  "DNS & Ingress",
+			Pkg:   "./cmd/dns-service",
+			Bin:   "dns-service",
+			Port:  8088,
+			Color: colorGreen,
+		},
+		{
 			Name:  "API Gateway",
 			Pkg:   "./cmd/api-gateway",
 			Bin:   "api-gateway",

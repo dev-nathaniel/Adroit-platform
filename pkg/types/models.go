@@ -271,16 +271,76 @@ type DatabaseInstance struct {
 	UpdatedAt      time.Time      `json:"updated_at"`
 }
 
-// Domain represents a custom domain pointing to a service via Caddy edge
-type Domain struct {
-	ID         string    `json:"id"`
-	ServiceID  string    `json:"service_id"`
-	DomainName string    `json:"domain_name"`
-	Verified   bool      `json:"verified"`
-	SSLActive  bool      `json:"ssl_active"`
-	CreatedAt  time.Time `json:"created_at"`
-	UpdatedAt  time.Time `json:"updated_at"`
+// DomainStatus represents the DNS challenge status
+type DomainStatus string
+
+const (
+	DomainStatusPendingVerification DomainStatus = "pending_verification"
+	DomainStatusActive              DomainStatus = "active"
+	DomainStatusFailedVerification  DomainStatus = "failed_verification"
+)
+
+// VerificationType specifies the DNS record challenge method
+type VerificationType string
+
+const (
+	VerificationTypeCNAME VerificationType = "cname"
+	VerificationTypeTXT   VerificationType = "txt"
+)
+
+// SSLStatus tracks edge TLS certificate issuance via ACME
+type SSLStatus string
+
+const (
+	SSLStatusPending SSLStatus = "pending"
+	SSLStatusIssuing SSLStatus = "issuing"
+	SSLStatusActive  SSLStatus = "active"
+	SSLStatusFailed  SSLStatus = "failed"
+)
+
+// CustomDomain represents a custom domain pointing to a service via Caddy edge
+type CustomDomain struct {
+	ID                string           `json:"id"`
+	ServiceID         string           `json:"service_id"`
+	Domain            string           `json:"domain"`
+	Status            DomainStatus     `json:"status"`
+	VerificationType  VerificationType `json:"verification_type"`
+	VerificationToken string           `json:"verification_token"`
+	IsPrimary         bool             `json:"is_primary"`
+	SSLStatus         SSLStatus        `json:"ssl_status"`
+	SSLError          string           `json:"ssl_error,omitempty"`
+	VerifiedAt        *time.Time       `json:"verified_at,omitempty"`
+	CreatedAt         time.Time        `json:"created_at"`
+	UpdatedAt         time.Time        `json:"updated_at"`
 }
+
+// Domain is an alias for CustomDomain
+type Domain = CustomDomain
+
+// IngressRoute tracks dynamic reverse proxy bindings in Caddy
+type IngressRoute struct {
+	ID           string    `json:"id"`
+	ServiceID    string    `json:"service_id"`
+	DomainID     *string   `json:"domain_id,omitempty"`
+	HostPattern  string    `json:"host_pattern"`
+	UpstreamURL  string    `json:"upstream_url"`
+	IsActive     bool      `json:"is_active"`
+	LastSyncedAt time.Time `json:"last_synced_at"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
+}
+
+// DNSChallengeDetails provides instructions for the user to configure their DNS
+type DNSChallengeDetails struct {
+	Domain            string           `json:"domain"`
+	VerificationType  VerificationType `json:"verification_type"`
+	TargetHost        string           `json:"target_host"`                  // e.g. "cname.adroit.run" for CNAME
+	RecordName        string           `json:"record_name"`                  // e.g. "_adroit-challenge.api.example.com" for TXT, or "api.example.com" for CNAME
+	VerificationToken string           `json:"verification_token,omitempty"` // For TXT
+	Status            DomainStatus     `json:"status"`
+	Instructions      string           `json:"instructions"`
+}
+
 
 // GitProviderType defines supported VCS providers
 type GitProviderType string

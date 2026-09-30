@@ -60,6 +60,11 @@
 			"key": "deploymentId",
 			"value": "",
 			"type": "string"
+		},
+		{
+			"key": "domainId",
+			"value": "",
+			"type": "string"
 		}
 	],
 	"item": [
@@ -2246,7 +2251,261 @@
 					"response": []
 				}
 			]
+		},
+		{
+			"name": "8. Ingress & Custom Domains",
+			"item": [
+				{
+					"name": "Add Custom Domain (CNAME)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 201 || pm.response.code === 200) {",
+									"    var json = pm.response.json();",
+									"    if (json.data && json.data.domain && json.data.domain.id) {",
+									"        pm.environment.set(\"domainId\", json.data.domain.id);",
+									"        console.log(\"Saved domainId:\", json.data.domain.id);",
+									"    }",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"domain\": \"api.mycompany.org\",\n  \"verification_type\": \"cname\",\n  \"is_primary\": true\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/services/{{serviceId}}/domains",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"services",
+								"{{serviceId}}",
+								"domains"
+							]
+						},
+						"description": "Registers a new custom domain for the service and produces challenge verification instructions."
+					},
+					"response": []
+				},
+				{
+					"name": "Add Custom Domain (TXT)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"domain\": \"portal.mycompany.org\",\n  \"verification_type\": \"txt\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/services/{{serviceId}}/domains",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"services",
+								"{{serviceId}}",
+								"domains"
+							]
+						},
+						"description": "Registers a custom domain with TXT challenge verification."
+					},
+					"response": []
+				},
+				{
+					"name": "List Service Domains",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/services/{{serviceId}}/domains",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"services",
+								"{{serviceId}}",
+								"domains"
+							]
+						},
+						"description": "Lists all custom domains registered for the given service."
+					},
+					"response": []
+				},
+				{
+					"name": "Get Domain Details",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/domains/{{domainId}}",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"domains",
+								"{{domainId}}"
+							]
+						},
+						"description": "Returns domain status, SSL issuance state, and DNS configuration instructions."
+					},
+					"response": []
+				},
+				{
+					"name": "Verify Domain Challenge",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/domains/{{domainId}}/verify",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"domains",
+								"{{domainId}}",
+								"verify"
+							]
+						},
+						"description": "Triggers immediate DNS resolution check (CNAME or TXT) against public DNS servers."
+					},
+					"response": []
+				},
+				{
+					"name": "Sync Domain Edge Route",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"upstream_url\": \"127.0.0.1:8080\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/domains/{{domainId}}/sync",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"domains",
+								"{{domainId}}",
+								"sync"
+							]
+						},
+						"description": "Forces Caddy edge reverse proxy synchronization for a verified domain."
+					},
+					"response": []
+				},
+				{
+					"name": "Force Sync Service Ingress Routes",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/services/{{serviceId}}/sync-routes",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"services",
+								"{{serviceId}}",
+								"sync-routes"
+							]
+						},
+						"description": "Synchronizes Caddy routes for the default platform subdomain and all verified domains of the service."
+					},
+					"response": []
+				},
+				{
+					"name": "List All Ingress Routes",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/ingress/routes",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"ingress",
+								"routes"
+							]
+						},
+						"description": "Returns all active edge reverse proxy routes configured in Caddy."
+					},
+					"response": []
+				},
+				{
+					"name": "Delete Custom Domain",
+					"request": {
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/domains/{{domainId}}",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"domains",
+								"{{domainId}}"
+							]
+						},
+						"description": "Removes custom domain binding and deprovisions Caddy edge reverse proxy routes."
+					},
+					"response": []
+				}
+			]
 		}
 	]
 }
+
 

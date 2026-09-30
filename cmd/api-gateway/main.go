@@ -28,6 +28,7 @@ type DownstreamConfig struct {
 	GitServiceURL          string
 	BuildServiceURL        string
 	OrchestrationServiceURL string
+	DNSServiceURL          string
 }
 
 // SetupRouter creates and configures the Chi router, middleware chain, and service proxies
@@ -132,6 +133,17 @@ func SetupRouter(log *slog.Logger, rl *middleware.RateLimiter, downstreams Downs
 		}
 	}
 
+	if downstreams.DNSServiceURL != "" {
+		if dnsProxy, err := apigateway.CreateServiceProxy("dns-service", downstreams.DNSServiceURL, log); err == nil {
+			r.Mount("/api/v1/domains", dnsProxy)
+			r.Mount("/api/v1/ingress", dnsProxy)
+			r.HandleFunc("/api/v1/services/{id}/domains", dnsProxy.ServeHTTP)
+			r.HandleFunc("/api/v1/services/{id}/domains/*", dnsProxy.ServeHTTP)
+			r.HandleFunc("/api/v1/services/{id}/sync-routes", dnsProxy.ServeHTTP)
+			log.Info("Mounted proxy for dns-service", slog.String("target", downstreams.DNSServiceURL))
+		}
+	}
+
 	// 7. Custom 404 & 405 Handlers
 	r.NotFound(func(w http.ResponseWriter, r *http.Request) {
 		response.NotFound(w, fmt.Sprintf("Route %s %s not found", r.Method, r.URL.Path))
@@ -158,6 +170,7 @@ func main() {
 		GitServiceURL:          config.GetEnv("GIT_SERVICE_URL", "http://localhost:8085"),
 		BuildServiceURL:        config.GetEnv("BUILD_SERVICE_URL", "http://localhost:8086"),
 		OrchestrationServiceURL: config.GetEnv("ORCHESTRATION_SERVICE_URL", "http://localhost:8087"),
+		DNSServiceURL:          config.GetEnv("DNS_SERVICE_URL", "http://localhost:8088"),
 	}
 
 	// 2. Initialize structured logger
@@ -178,6 +191,7 @@ func main() {
 		slog.String("git_service_url", downstreams.GitServiceURL),
 		slog.String("build_service_url", downstreams.BuildServiceURL),
 		slog.String("orchestration_service_url", downstreams.OrchestrationServiceURL),
+		slog.String("dns_service_url", downstreams.DNSServiceURL),
 	)
 
 	// 3. Initialize Rate Limiter

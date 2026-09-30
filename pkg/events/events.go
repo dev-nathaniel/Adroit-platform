@@ -55,6 +55,12 @@ const (
 	// Git Integration events
 	SubjectGitPushReceived    = "adroit.git.push_received"
 	SubjectGitWebhookReceived = "adroit.git.webhook_received"
+
+	// DNS, Domain & Ingress events
+	SubjectDomainCreated  = "adroit.domain.created"
+	SubjectDomainVerified = "adroit.domain.verified"
+	SubjectDomainDeleted  = "adroit.domain.deleted"
+	SubjectRouteUpdated   = "adroit.route.updated"
 )
 
 // Event is the universal CloudEvents-like envelope sent across NATS JetStream
@@ -295,5 +301,36 @@ type GitWebhookReceivedPayload struct {
 	RepoURL    string `json:"repo_url"`
 	Status     string `json:"status"`
 }
+
+// DomainCreatedPayload is emitted when a new custom domain is registered
+type DomainCreatedPayload struct {
+	DomainID         string `json:"domain_id"`
+	ServiceID        string `json:"service_id"`
+	Domain           string `json:"domain"`
+	VerificationType string `json:"verification_type"`
+}
+
+// DomainVerifiedPayload is emitted when a custom domain successfully passes DNS verification
+type DomainVerifiedPayload struct {
+	DomainID  string `json:"domain_id"`
+	ServiceID string `json:"service_id"`
+	Domain    string `json:"domain"`
+}
+
+// DomainDeletedPayload is emitted when a custom domain is deleted
+type DomainDeletedPayload struct {
+	DomainID  string `json:"domain_id"`
+	ServiceID string `json:"service_id"`
+	Domain    string `json:"domain"`
+}
+
+// RouteUpdatedPayload is emitted when Caddy edge routing rules are re-synchronized
+type RouteUpdatedPayload struct {
+	ServiceID   string   `json:"service_id"`
+	HostPattern string   `json:"host_pattern"`
+	UpstreamURL string   `json:"upstream_url"`
+	Domains     []string `json:"domains"`
+}
+
 
 
