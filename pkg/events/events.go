@@ -135,6 +135,16 @@ type DeployRequestedPayload struct {
 	HealthCheck  types.HealthCheckConfig `json:"health_check"`
 	EnvVars      map[string]string       `json:"env_vars,omitempty"`
 	RuntimeTier  types.RuntimeTier       `json:"runtime_tier"`
+	Strategy     types.RolloutStrategy   `json:"strategy,omitempty"`
+}
+
+// DeployStartedPayload is emitted when Nomad job submission commences
+type DeployStartedPayload struct {
+	DeploymentID string                `json:"deployment_id"`
+	ServiceID    string                `json:"service_id"`
+	NomadJobID   string                `json:"nomad_job_id"`
+	Strategy     types.RolloutStrategy `json:"strategy"`
+	StartedAt    time.Time             `json:"started_at"`
 }
 
 // DeployHealthyPayload is emitted when health-check sidecars confirm application readiness
@@ -144,6 +154,24 @@ type DeployHealthyPayload struct {
 	NomadJobID   string `json:"nomad_job_id"`
 	ActiveURL    string `json:"active_url"`
 }
+
+// DeployFailedPayload is emitted when Nomad allocation or health check fails
+type DeployFailedPayload struct {
+	DeploymentID string `json:"deployment_id"`
+	ServiceID    string `json:"service_id"`
+	NomadJobID   string `json:"nomad_job_id,omitempty"`
+	Error        string `json:"error"`
+	DurationMs   int64  `json:"duration_ms,omitempty"`
+}
+
+// DeployStoppedPayload is emitted when a deployment is stopped or cancelled
+type DeployStoppedPayload struct {
+	DeploymentID string `json:"deployment_id"`
+	ServiceID    string `json:"service_id"`
+	NomadJobID   string `json:"nomad_job_id"`
+	Reason       string `json:"reason,omitempty"`
+}
+
 
 // DatabaseProvisionPayload is emitted to initiate a managed database cluster
 type DatabaseProvisionPayload struct {

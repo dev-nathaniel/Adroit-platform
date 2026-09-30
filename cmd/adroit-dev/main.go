@@ -84,6 +84,13 @@ func main() {
 			Color: colorYellow,
 		},
 		{
+			Name:  "Orchestration Svc",
+			Pkg:   "./cmd/orchestration-service",
+			Bin:   "orchestration-service",
+			Port:  8087,
+			Color: colorBlue,
+		},
+		{
 			Name:  "API Gateway",
 			Pkg:   "./cmd/api-gateway",
 			Bin:   "api-gateway",

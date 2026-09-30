@@ -50,10 +50,14 @@ servers:
     description: Git Integration Service (Direct Microservice Port)
   - url: http://localhost:8086
     description: Build Service (Direct Microservice Port)
+  - url: http://localhost:8087
+    description: Orchestration & Runtime Service (Direct Microservice Port)
 
 tags:
   - name: System & Gateway
     description: Gateway health, information, and status probes
+  - name: Deployments & Orchestration
+    description: Nomad job translation, rolling/canary/blue-green rollouts, allocation inspection, and instance scaling
   - name: Authentication
     description: User registration, login, credential verification, and JWT session profiles
   - name: User Profiles
@@ -2076,6 +2080,367 @@ paths:
         '404':
           $ref: '#/components/responses/NotFoundError'
 
+  # ==========================================
+  # DEPLOYMENTS & ORCHESTRATION
+  # ==========================================
+  /api/v1/services/{id}/deploy:
+    post:
+      tags:
+        - Deployments & Orchestration
+      summary: Trigger Service Deployment
+      description: Initiates a new workload deployment on Nomad for a service (linking latest or specified build).
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique UUID of the service to deploy
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                build_id:
+                  type: string
+                  format: uuid
+                  description: Optional build ID. Defaults to latest succeeded build.
+                replicas:
+                  type: integer
+                  description: Target instance replica count. Defaults to service min_replicas.
+                  example: 2
+                strategy:
+                  type: string
+                  enum: [rolling, canary, blue-green]
+                  description: Rollout update strategy. Defaults to rolling.
+                  example: rolling
+      responses:
+        '202':
+          description: Deployment accepted and scheduling initiated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeploymentResponseEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /api/v1/services/{id}/deployments:
+    get:
+      tags:
+        - Deployments & Orchestration
+      summary: List Service Deployments
+      description: Returns paginated deployment history for a specific service.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique UUID of the service
+          schema:
+            type: string
+            format: uuid
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 1
+        - name: per_page
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: List of deployments
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeploymentListResponseEnvelope'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /api/v1/services/{id}/scale:
+    post:
+      tags:
+        - Deployments & Orchestration
+      summary: Scale Service Replicas
+      description: Dynamically scales the active replica count for a service on Nomad.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique UUID of the service to scale
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - replicas
+              properties:
+                replicas:
+                  type: integer
+                  minimum: 1
+                  example: 3
+      responses:
+        '200':
+          description: Service scaling applied successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScaleResponseEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /api/v1/deployments/{id}:
+    get:
+      tags:
+        - Deployments & Orchestration
+      summary: Get Deployment Details
+      description: Returns deployment status, active URL, allocations, and rollout audit history.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique UUID of the deployment
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Detailed deployment status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeploymentDetailResponseEnvelope'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /api/v1/deployments/{id}/spec:
+    get:
+      tags:
+        - Deployments & Orchestration
+      summary: Get Nomad HCL Job Specification
+      description: Returns the generated HashiCorp Nomad HCL2 job specification (.nomad.hcl).
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique UUID of the deployment
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Rendered Nomad job specification
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      deployment_id:
+                        type: string
+                      job_spec:
+                        type: string
+            text/plain:
+              schema:
+                type: string
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /api/v1/deployments/{id}/allocations:
+    get:
+      tags:
+        - Deployments & Orchestration
+      summary: List Deployment Allocations
+      description: Returns Nomad client allocations associated with the deployment.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique UUID of the deployment
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Allocations list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AllocationsResponseEnvelope'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /api/v1/deployments/{id}/events:
+    get:
+      tags:
+        - Deployments & Orchestration
+      summary: Get Rollout Audit Timeline
+      description: Returns the chronological audit events emitted during the deployment rollout.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique UUID of the deployment
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Deployment timeline events
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeploymentEventsResponseEnvelope'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /api/v1/deployments/{id}/promote:
+    post:
+      tags:
+        - Deployments & Orchestration
+      summary: Promote Canary Deployment
+      description: Manually promotes a healthy canary allocation to complete the full replica rollout.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique UUID of the canary deployment
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Canary promoted successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponseEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /api/v1/deployments/{id}/rollback:
+    post:
+      tags:
+        - Deployments & Orchestration
+      summary: Rollback Deployment
+      description: Reverts the service to a previously verified deployment.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique UUID of the deployment to roll back
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '202':
+          description: Rollback initiated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      rollback_to:
+                        type: string
+                      new_deployment_id:
+                        type: string
+                      status:
+                        type: string
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /api/v1/deployments/{id}/cancel:
+    post:
+      tags:
+        - Deployments & Orchestration
+      summary: Cancel Deployment
+      description: Aborts an active or deploying rollout and stops associated Nomad allocations.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique UUID of the deployment to cancel
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Deployment cancelled successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponseEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
 # ==========================================
 # COMPONENTS & SCHEMAS
 # ==========================================
@@ -3831,6 +4196,223 @@ components:
             total_lines:
               type: integer
               example: 8
+      required:
+        - success
+        - data
+
+    # --- Deployment & Orchestration Schemas ---
+    Deployment:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        service_id:
+          type: string
+          format: uuid
+        build_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [pending, deploying, active, replaced, failed, stopped]
+          example: active
+        nomad_job_id:
+          type: string
+          example: adroit-svc-b5f7952a-92e1-4509-bc01-e28a5da98e6b
+        active_url:
+          type: string
+          example: https://api.adroit.run
+        replicas:
+          type: integer
+          example: 2
+        strategy:
+          type: string
+          enum: [rolling, canary, blue-green]
+          example: rolling
+        canary_promoted:
+          type: boolean
+          example: false
+        job_spec:
+          type: string
+        error_message:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required:
+        - id
+        - service_id
+        - build_id
+        - status
+        - replicas
+
+    DeploymentResponseEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          $ref: '#/components/schemas/Deployment'
+      required:
+        - success
+        - data
+
+    DeploymentListResponseEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Deployment'
+        meta:
+          $ref: '#/components/schemas/Pagination'
+      required:
+        - success
+        - data
+
+    DeploymentDetailResponseEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: object
+          properties:
+            deployment:
+              $ref: '#/components/schemas/Deployment'
+            service:
+              $ref: '#/components/schemas/Service'
+            allocations:
+              type: array
+              items:
+                $ref: '#/components/schemas/Allocation'
+            events:
+              type: array
+              items:
+                $ref: '#/components/schemas/DeploymentEvent'
+      required:
+        - success
+        - data
+
+    Allocation:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        deployment_id:
+          type: string
+          format: uuid
+        nomad_alloc_id:
+          type: string
+          example: alloc-1a2b3c4d
+        node_name:
+          type: string
+          example: adroit-worker-01
+        client_status:
+          type: string
+          example: running
+        desired_status:
+          type: string
+          example: run
+        is_healthy:
+          type: boolean
+          example: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required:
+        - id
+        - deployment_id
+        - nomad_alloc_id
+        - client_status
+        - desired_status
+
+    AllocationsResponseEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Allocation'
+      required:
+        - success
+        - data
+
+    DeploymentEvent:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        deployment_id:
+          type: string
+          format: uuid
+        event_type:
+          type: string
+          example: deployment_healthy
+        message:
+          type: string
+          example: All 2 replicas healthy. Traffic routed to https://api.adroit.run
+        details:
+          type: object
+        created_at:
+          type: string
+          format: date-time
+      required:
+        - id
+        - deployment_id
+        - event_type
+        - message
+        - created_at
+
+    DeploymentEventsResponseEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/DeploymentEvent'
+      required:
+        - success
+        - data
+
+    ScaleResponseEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: object
+          properties:
+            service_id:
+              type: string
+              format: uuid
+            replicas:
+              type: integer
+              example: 4
+            status:
+              type: string
+              example: scaling_applied
       required:
         - success
         - data

@@ -27,6 +27,7 @@ type DownstreamConfig struct {
 	ProjectServiceURL      string
 	GitServiceURL          string
 	BuildServiceURL        string
+	OrchestrationServiceURL string
 }
 
 // SetupRouter creates and configures the Chi router, middleware chain, and service proxies
@@ -120,6 +121,17 @@ func SetupRouter(log *slog.Logger, rl *middleware.RateLimiter, downstreams Downs
 		}
 	}
 
+	if downstreams.OrchestrationServiceURL != "" {
+		if orchProxy, err := apigateway.CreateServiceProxy("orchestration-service", downstreams.OrchestrationServiceURL, log); err == nil {
+			r.Mount("/api/v1/deployments", orchProxy)
+			r.HandleFunc("/api/v1/services/{id}/deployments", orchProxy.ServeHTTP)
+			r.HandleFunc("/api/v1/services/{id}/deployments/*", orchProxy.ServeHTTP)
+			r.HandleFunc("/api/v1/services/{id}/deploy", orchProxy.ServeHTTP)
+			r.HandleFunc("/api/v1/services/{id}/scale", orchProxy.ServeHTTP)
+			log.Info("Mounted proxy for orchestration-service", slog.String("target", downstreams.OrchestrationServiceURL))
+		}
+	}
+
 	// 7. Custom 404 & 405 Handlers
 	r.NotFound(func(w http.ResponseWriter, r *http.Request) {
 		response.NotFound(w, fmt.Sprintf("Route %s %s not found", r.Method, r.URL.Path))
@@ -145,6 +157,7 @@ func main() {
 		ProjectServiceURL:      config.GetEnv("PROJECT_SERVICE_URL", "http://localhost:8084"),
 		GitServiceURL:          config.GetEnv("GIT_SERVICE_URL", "http://localhost:8085"),
 		BuildServiceURL:        config.GetEnv("BUILD_SERVICE_URL", "http://localhost:8086"),
+		OrchestrationServiceURL: config.GetEnv("ORCHESTRATION_SERVICE_URL", "http://localhost:8087"),
 	}
 
 	// 2. Initialize structured logger
@@ -163,6 +176,8 @@ func main() {
 		slog.String("notification_service_url", downstreams.NotificationServiceURL),
 		slog.String("project_service_url", downstreams.ProjectServiceURL),
 		slog.String("git_service_url", downstreams.GitServiceURL),
+		slog.String("build_service_url", downstreams.BuildServiceURL),
+		slog.String("orchestration_service_url", downstreams.OrchestrationServiceURL),
 	)
 
 	// 3. Initialize Rate Limiter

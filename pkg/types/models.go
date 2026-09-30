@@ -46,6 +46,16 @@ const (
 	DeploymentStatusStopped   DeploymentStatus = "stopped"
 )
 
+// RolloutStrategy defines the deployment rollout mechanism in Nomad
+type RolloutStrategy string
+
+const (
+	RolloutStrategyRolling   RolloutStrategy = "rolling"
+	RolloutStrategyCanary    RolloutStrategy = "canary"
+	RolloutStrategyBlueGreen RolloutStrategy = "blue-green"
+)
+
+
 // DatabaseType defines managed database engines
 type DatabaseType string
 
@@ -157,10 +167,11 @@ type Service struct {
 	MinReplicas    int               `json:"min_replicas"`
 	MaxReplicas    int               `json:"max_replicas"`
 	Resources      ResourceLimits    `json:"resources"`
-	HealthCheck    HealthCheckConfig `json:"health_check"`
-	WebhookSecret  string            `json:"webhook_secret,omitempty"`
-	CreatedAt      time.Time         `json:"created_at"`
-	UpdatedAt      time.Time         `json:"updated_at"`
+	HealthCheck        HealthCheckConfig `json:"health_check"`
+	WebhookSecret      string            `json:"webhook_secret,omitempty"`
+	ActiveDeploymentID *string           `json:"active_deployment_id,omitempty"`
+	CreatedAt          time.Time         `json:"created_at"`
+	UpdatedAt          time.Time         `json:"updated_at"`
 }
 
 // EnvironmentVariable represents a configuration key-value pair scoped to a service or project
@@ -206,17 +217,44 @@ type BuildLogEntry struct {
 
 // Deployment represents a running version of a service on Nomad
 type Deployment struct {
-	ID           string           `json:"id"`
-	ServiceID    string           `json:"service_id"`
-	BuildID      string           `json:"build_id"`
-	Status       DeploymentStatus `json:"status"`
-	NomadJobID   string           `json:"nomad_job_id,omitempty"`
-	ActiveURL    string           `json:"active_url,omitempty"`
-	Replicas     int              `json:"replicas"`
-	ErrorMessage string           `json:"error_message,omitempty"`
-	CreatedAt    time.Time        `json:"created_at"`
-	UpdatedAt    time.Time        `json:"updated_at"`
+	ID             string           `json:"id"`
+	ServiceID      string           `json:"service_id"`
+	BuildID        string           `json:"build_id"`
+	Status         DeploymentStatus `json:"status"`
+	NomadJobID     string           `json:"nomad_job_id,omitempty"`
+	ActiveURL      string           `json:"active_url,omitempty"`
+	Replicas       int              `json:"replicas"`
+	Strategy       RolloutStrategy  `json:"strategy,omitempty"`
+	CanaryPromoted bool             `json:"canary_promoted"`
+	JobSpec        string           `json:"job_spec,omitempty"`
+	ErrorMessage   string           `json:"error_message,omitempty"`
+	CreatedAt      time.Time        `json:"created_at"`
+	UpdatedAt      time.Time        `json:"updated_at"`
 }
+
+// Allocation represents a workload allocation instance scheduled on a Nomad client node
+type Allocation struct {
+	ID            string    `json:"id"`
+	DeploymentID  string    `json:"deployment_id"`
+	NomadAllocID  string    `json:"nomad_alloc_id"`
+	NodeName      string    `json:"node_name"`
+	ClientStatus  string    `json:"client_status"` // "running", "pending", "failed", "complete"
+	DesiredStatus string    `json:"desired_status"` // "run", "stop"
+	IsHealthy     bool      `json:"is_healthy"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
+}
+
+// DeploymentEvent records a state transition milestone or audit trace during a rollout
+type DeploymentEvent struct {
+	ID           string         `json:"id"`
+	DeploymentID string         `json:"deployment_id"`
+	EventType    string         `json:"event_type"` // e.g. "job_submitted", "canary_spawned", "canary_promoted", "healthy", "failed"
+	Message      string         `json:"message"`
+	Details      map[string]any `json:"details,omitempty"`
+	CreatedAt    time.Time      `json:"created_at"`
+}
+
 
 // DatabaseInstance represents a managed stateful database provisioned by the platform
 type DatabaseInstance struct {

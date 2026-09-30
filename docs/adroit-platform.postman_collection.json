@@ -50,6 +50,16 @@
 			"key": "serviceId",
 			"value": "",
 			"type": "string"
+		},
+		{
+			"key": "buildId",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "deploymentId",
+			"value": "",
+			"type": "string"
 		}
 	],
 	"item": [
@@ -1871,6 +1881,372 @@
 					"response": []
 				}
 			]
+		},
+		{
+			"name": "7. Orchestration & Runtime Service",
+			"item": [
+				{
+					"name": "Trigger Service Deployment (Rolling)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 202 || pm.response.code === 200 || pm.response.code === 201) {",
+									"    var json = pm.response.json();",
+									"    if (json.data && json.data.id) {",
+									"        pm.environment.set(\"deploymentId\", json.data.id);",
+									"        console.log(\"Saved deploymentId:\", json.data.id);",
+									"    }",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"build_id\": \"{{buildId}}\",\n  \"replicas\": 2,\n  \"strategy\": \"rolling\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/services/{{serviceId}}/deploy",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"services",
+								"{{serviceId}}",
+								"deploy"
+							]
+						},
+						"description": "Initiates a zero-downtime rolling update deployment on Nomad for the service."
+					},
+					"response": []
+				},
+				{
+					"name": "Trigger Service Deployment (Canary)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 202 || pm.response.code === 200 || pm.response.code === 201) {",
+									"    var json = pm.response.json();",
+									"    if (json.data && json.data.id) {",
+									"        pm.environment.set(\"deploymentId\", json.data.id);",
+									"        console.log(\"Saved deploymentId:\", json.data.id);",
+									"    }",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"build_id\": \"{{buildId}}\",\n  \"replicas\": 3,\n  \"strategy\": \"canary\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/services/{{serviceId}}/deploy",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"services",
+								"{{serviceId}}",
+								"deploy"
+							]
+						},
+						"description": "Initiates a canary deployment on Nomad, launching an isolated test allocation first."
+					},
+					"response": []
+				},
+				{
+					"name": "Trigger Service Deployment (Blue-Green)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 202 || pm.response.code === 200 || pm.response.code === 201) {",
+									"    var json = pm.response.json();",
+									"    if (json.data && json.data.id) {",
+									"        pm.environment.set(\"deploymentId\", json.data.id);",
+									"        console.log(\"Saved deploymentId:\", json.data.id);",
+									"    }",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"build_id\": \"{{buildId}}\",\n  \"replicas\": 2,\n  \"strategy\": \"blue-green\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/services/{{serviceId}}/deploy",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"services",
+								"{{serviceId}}",
+								"deploy"
+							]
+						},
+						"description": "Launches a parallel blue-green deployment on Nomad before switching ingress traffic."
+					},
+					"response": []
+				},
+				{
+					"name": "List Service Deployments",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/services/{{serviceId}}/deployments?page=1&per_page=20",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"services",
+								"{{serviceId}}",
+								"deployments"
+							],
+							"query": [
+								{
+									"key": "page",
+									"value": "1"
+								},
+								{
+									"key": "per_page",
+									"value": "20"
+								}
+							]
+						},
+						"description": "Queries paginated deployment records for a specific service."
+					},
+					"response": []
+				},
+				{
+					"name": "Scale Service Replicas",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"replicas\": 4\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/services/{{serviceId}}/scale",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"services",
+								"{{serviceId}}",
+								"scale"
+							]
+						},
+						"description": "Dynamically scales the active replica count for a service on Nomad and updates database configuration."
+					},
+					"response": []
+				},
+				{
+					"name": "Get Deployment Details",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/deployments/{{deploymentId}}",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"deployments",
+								"{{deploymentId}}"
+							]
+						},
+						"description": "Fetches deployment status, active URL, replica count, allocations, and rollout audit timeline."
+					},
+					"response": []
+				},
+				{
+					"name": "Get Nomad Job Spec (HCL)",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/deployments/{{deploymentId}}/spec",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"deployments",
+								"{{deploymentId}}",
+								"spec"
+							]
+						},
+						"description": "Inspects the rendered HashiCorp Nomad HCL2 job specification (.nomad.hcl) generated for the deployment."
+					},
+					"response": []
+				},
+				{
+					"name": "List Deployment Allocations",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/deployments/{{deploymentId}}/allocations",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"deployments",
+								"{{deploymentId}}",
+								"allocations"
+							]
+						},
+						"description": "Returns Nomad client allocations, client statuses, desired statuses, and health check states."
+					},
+					"response": []
+				},
+				{
+					"name": "Get Rollout Audit Timeline",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/deployments/{{deploymentId}}/events",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"deployments",
+								"{{deploymentId}}",
+								"events"
+							]
+						},
+						"description": "Returns chronological milestone events recorded during the rollout."
+					},
+					"response": []
+				},
+				{
+					"name": "Promote Canary Deployment",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/deployments/{{deploymentId}}/promote",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"deployments",
+								"{{deploymentId}}",
+								"promote"
+							]
+						},
+						"description": "Approves and promotes a healthy canary allocation to trigger full replica rollout."
+					},
+					"response": []
+				},
+				{
+					"name": "Rollback Deployment",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/deployments/{{deploymentId}}/rollback",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"deployments",
+								"{{deploymentId}}",
+								"rollback"
+							]
+						},
+						"description": "Reverts the service to a previously verified deployment release."
+					},
+					"response": []
+				},
+				{
+					"name": "Cancel Deployment",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/deployments/{{deploymentId}}/cancel",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"deployments",
+								"{{deploymentId}}",
+								"cancel"
+							]
+						},
+						"description": "Cancels an in-flight deployment rollout and stops running Nomad allocations."
+					},
+					"response": []
+				}
+			]
 		}
 	]
 }
+
