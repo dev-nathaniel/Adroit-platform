@@ -26,6 +26,7 @@ type DownstreamConfig struct {
 	NotificationServiceURL string
 	ProjectServiceURL      string
 	GitServiceURL          string
+	BuildServiceURL        string
 }
 
 // SetupRouter creates and configures the Chi router, middleware chain, and service proxies
@@ -94,6 +95,15 @@ func SetupRouter(log *slog.Logger, rl *middleware.RateLimiter, downstreams Downs
 		}
 	}
 
+	if downstreams.BuildServiceURL != "" {
+		if buildProxy, err := apigateway.CreateServiceProxy("build-service", downstreams.BuildServiceURL, log); err == nil {
+			r.Mount("/api/v1/builds", buildProxy)
+			r.HandleFunc("/api/v1/services/{id}/builds", buildProxy.ServeHTTP)
+			r.HandleFunc("/api/v1/services/{id}/builds/*", buildProxy.ServeHTTP)
+			log.Info("Mounted proxy for build-service", slog.String("target", downstreams.BuildServiceURL))
+		}
+	}
+
 	if downstreams.ProjectServiceURL != "" {
 		if projProxy, err := apigateway.CreateServiceProxy("project-service", downstreams.ProjectServiceURL, log); err == nil {
 			r.Mount("/api/v1/projects", projProxy)
@@ -134,6 +144,7 @@ func main() {
 		NotificationServiceURL: config.GetEnv("NOTIFICATION_SERVICE_URL", "http://localhost:8083"),
 		ProjectServiceURL:      config.GetEnv("PROJECT_SERVICE_URL", "http://localhost:8084"),
 		GitServiceURL:          config.GetEnv("GIT_SERVICE_URL", "http://localhost:8085"),
+		BuildServiceURL:        config.GetEnv("BUILD_SERVICE_URL", "http://localhost:8086"),
 	}
 
 	// 2. Initialize structured logger

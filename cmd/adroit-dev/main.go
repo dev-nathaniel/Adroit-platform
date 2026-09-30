@@ -77,6 +77,13 @@ func main() {
 			Color: colorMagenta,
 		},
 		{
+			Name:  "Build Service",
+			Pkg:   "./cmd/build-service",
+			Bin:   "build-service",
+			Port:  8086,
+			Color: colorYellow,
+		},
+		{
 			Name:  "API Gateway",
 			Pkg:   "./cmd/api-gateway",
 			Bin:   "api-gateway",

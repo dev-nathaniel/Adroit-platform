@@ -1676,6 +1676,201 @@
 					"response": []
 				}
 			]
+		},
+		{
+			"name": "6. Build Service",
+			"item": [
+				{
+					"name": "Trigger Build (Manual)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 201) {",
+									"    var json = pm.response.json();",
+									"    if (json.data && json.data.id) {",
+									"        pm.environment.set(\"buildId\", json.data.id);",
+									"        console.log(\"Saved buildId:\", json.data.id);",
+									"    }",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"branch\": \"main\",\n  \"commit_hash\": \"c0ffee123456\",\n  \"message\": \"Manual trigger from Postman\",\n  \"build_args\": {\n    \"ENV\": \"production\"\n  }\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/services/{{serviceId}}/builds",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"services",
+								"{{serviceId}}",
+								"builds"
+							]
+						},
+						"description": "Queues a new container build for the specified service with optional branch and commit overrides."
+					},
+					"response": []
+				},
+				{
+					"name": "List Service Builds",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/services/{{serviceId}}/builds?limit=20&offset=0",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"services",
+								"{{serviceId}}",
+								"builds"
+							],
+							"query": [
+								{
+									"key": "limit",
+									"value": "20"
+								},
+								{
+									"key": "offset",
+									"value": "0"
+								}
+							]
+						},
+						"description": "Retrieves the history of past and active container builds for a service."
+					},
+					"response": []
+				},
+				{
+					"name": "Get Build Status",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/builds/{{buildId}}",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"builds",
+								"{{buildId}}"
+							]
+						},
+						"description": "Returns detailed build status (queued, building, succeeded, failed, cancelled), image tag, SHA256 digest, and duration."
+					},
+					"response": []
+				},
+				{
+					"name": "Get Build Logs",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/builds/{{buildId}}/logs",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"builds",
+								"{{buildId}}",
+								"logs"
+							]
+						},
+						"description": "Fetches real-time or completed BuildKit execution logs for a build."
+					},
+					"response": []
+				},
+				{
+					"name": "Cancel Build",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/builds/{{buildId}}/cancel",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"builds",
+								"{{buildId}}",
+								"cancel"
+							]
+						},
+						"description": "Aborts an active or queued build and stops running compile workers."
+					},
+					"response": []
+				},
+				{
+					"name": "Trigger Build (Direct Body)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 201) {",
+									"    var json = pm.response.json();",
+									"    if (json.data && json.data.id) {",
+									"        pm.environment.set(\"buildId\", json.data.id);",
+									"    }",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"service_id\": \"{{serviceId}}\",\n  \"branch\": \"main\",\n  \"commit_hash\": \"9f82ab4d12c3\",\n  \"message\": \"Triggered from Postman direct\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/builds",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"builds"
+							]
+						},
+						"description": "Triggers a build by providing service_id directly in the JSON body."
+					},
+					"response": []
+				}
+			]
 		}
 	]
 }

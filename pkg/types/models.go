@@ -179,19 +179,29 @@ type EnvironmentVariable struct {
 
 // Build represents an artifact creation task executed by BuildKit
 type Build struct {
-	ID          string      `json:"id"`
-	ServiceID   string      `json:"service_id"`
-	CommitHash  string      `json:"commit_hash"`
-	Branch      string      `json:"branch"`
-	Message     string      `json:"message"`
-	Author      string      `json:"author"`
-	Status      BuildStatus `json:"status"`
-	ImageTag    string      `json:"image_tag,omitempty"`
-	ImageDigest string      `json:"image_digest,omitempty"`
-	DurationMs  int64       `json:"duration_ms,omitempty"`
-	TriggeredBy string      `json:"triggered_by"`
-	CreatedAt   time.Time   `json:"created_at"`
-	FinishedAt  *time.Time  `json:"finished_at,omitempty"`
+	ID           string      `json:"id"`
+	ServiceID    string      `json:"service_id"`
+	CommitHash   string      `json:"commit_hash"`
+	Branch       string      `json:"branch"`
+	Message      string      `json:"message"`
+	Author       string      `json:"author"`
+	Status       BuildStatus `json:"status"`
+	ImageTag     string      `json:"image_tag,omitempty"`
+	ImageDigest  string      `json:"image_digest,omitempty"`
+	DurationMs   int64       `json:"duration_ms,omitempty"`
+	TriggeredBy  string      `json:"triggered_by"`
+	ErrorMessage string      `json:"error_message,omitempty"`
+	CreatedAt    time.Time   `json:"created_at"`
+	FinishedAt   *time.Time  `json:"finished_at,omitempty"`
+}
+
+// BuildLogEntry represents a single line or trace item emitted during build execution
+type BuildLogEntry struct {
+	ID        string    `json:"id"`
+	BuildID   string    `json:"build_id"`
+	Line      string    `json:"line"`
+	Stream    string    `json:"stream"` // "stdout" or "stderr"
+	Timestamp time.Time `json:"timestamp"`
 }
 
 // Deployment represents a running version of a service on Nomad

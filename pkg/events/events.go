@@ -22,6 +22,7 @@ const (
 	SubjectBuildStarted   = "adroit.build.started"
 	SubjectBuildCompleted = "adroit.build.completed"
 	SubjectBuildFailed    = "adroit.build.failed"
+	SubjectBuildCancelled = "adroit.build.cancelled"
 
 	// Deployment events
 	SubjectDeployRequested = "adroit.deploy.requested"
@@ -90,6 +91,15 @@ type BuildRequestedPayload struct {
 	BuildArgs      map[string]string `json:"build_args,omitempty"`
 }
 
+// BuildStartedPayload is emitted when a worker starts building an artifact
+type BuildStartedPayload struct {
+	BuildID    string    `json:"build_id"`
+	ServiceID  string    `json:"service_id"`
+	CommitHash string    `json:"commit_hash"`
+	Branch     string    `json:"branch"`
+	StartedAt  time.Time `json:"started_at"`
+}
+
 // BuildCompletedPayload is emitted when BuildKit successfully produces an image
 type BuildCompletedPayload struct {
 	BuildID     string `json:"build_id"`
@@ -97,6 +107,20 @@ type BuildCompletedPayload struct {
 	ImageTag    string `json:"image_tag"`
 	ImageDigest string `json:"image_digest"`
 	DurationMs  int64  `json:"duration_ms"`
+}
+
+// BuildFailedPayload is emitted when an error occurs during build execution
+type BuildFailedPayload struct {
+	BuildID    string `json:"build_id"`
+	ServiceID  string `json:"service_id"`
+	Error      string `json:"error"`
+	DurationMs int64  `json:"duration_ms"`
+}
+
+// BuildCancelledPayload is emitted when a running or queued build is cancelled
+type BuildCancelledPayload struct {
+	BuildID   string `json:"build_id"`
+	ServiceID string `json:"service_id"`
 }
 
 // DeployRequestedPayload is emitted to request the Orchestration Service to launch on Nomad

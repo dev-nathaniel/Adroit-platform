@@ -46,6 +46,10 @@ servers:
     description: Notification Service (Direct Microservice Port)
   - url: http://localhost:8084
     description: Project & Service Catalog (Direct Microservice Port)
+  - url: http://localhost:8085
+    description: Git Integration Service (Direct Microservice Port)
+  - url: http://localhost:8086
+    description: Build Service (Direct Microservice Port)
 
 tags:
   - name: System & Gateway
@@ -66,6 +70,10 @@ tags:
     description: Workload lifecycle (standalone & in-project services, dynamic project relocation, specifications)
   - name: Environment Variables
     description: Secrets and environment configuration variables for services and projects
+  - name: Git Integration
+    description: Git provider linking, repository discovery, and webhook ingress
+  - name: Build Service
+    description: Build trigger lifecycle, BuildKit execution, live log streaming, and build cancellation
 
 
 paths:
@@ -1831,6 +1839,243 @@ paths:
               schema:
                 $ref: '#/components/schemas/WebhookEventsResponseEnvelope'
 
+  # ==========================================
+  # BUILD SERVICE
+  # ==========================================
+  /api/v1/services/{id}/builds:
+    post:
+      tags:
+        - Build Service
+      summary: Trigger a manual build for a service
+      description: Schedules a new container compilation task for a registered service using its configured repo and branch, with optional commit hash or branch overrides.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique UUID of the service
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TriggerBuildRequest'
+      responses:
+        '201':
+          description: Build successfully queued and execution scheduled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BuildResponseEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+    get:
+      tags:
+        - Build Service
+      summary: List build history for a service
+      description: Returns a paginated list of past and active container builds for a specific service, ordered newest first.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique UUID of the service
+          schema:
+            type: string
+            format: uuid
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 20
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 0
+        - name: status
+          in: query
+          required: false
+          description: Filter by build status (queued, building, succeeded, failed, cancelled)
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Paginated build history
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BuildListResponseEnvelope'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /api/v1/builds:
+    post:
+      tags:
+        - Build Service
+      summary: Trigger build directly with service ID in body
+      description: Alternative endpoint to queue a container build by passing `service_id` in the JSON request body.
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - service_id
+              properties:
+                service_id:
+                  type: string
+                  format: uuid
+                commit_hash:
+                  type: string
+                branch:
+                  type: string
+                message:
+                  type: string
+                build_args:
+                  type: object
+                  additionalProperties:
+                    type: string
+                dockerfile_path:
+                  type: string
+      responses:
+        '201':
+          description: Build successfully queued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BuildResponseEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  /api/v1/builds/{id}:
+    get:
+      tags:
+        - Build Service
+      summary: Get detailed build status and metrics
+      description: Returns build status (`queued`, `building`, `succeeded`, `failed`, `cancelled`), image tag, SHA256 digest, duration, and error messages.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique UUID of the build
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Detailed build record
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BuildResponseEnvelope'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /api/v1/builds/{id}/cancel:
+    post:
+      tags:
+        - Build Service
+      summary: Abort an active or queued build
+      description: Cancels in-flight container compilation and terminates any running runner worker or Nomad batch allocation.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique UUID of the build
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Build successfully cancelled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BuildResponseEnvelope'
+        '400':
+          description: Build is already finished (succeeded, failed, or cancelled)
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /api/v1/builds/{id}/logs:
+    get:
+      tags:
+        - Build Service
+      summary: Fetch real-time or completed build logs
+      description: Streams or fetches chronologically ordered build output logs emitted during BuildKit compilation.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique UUID of the build
+          schema:
+            type: string
+            format: uuid
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 1000
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 0
+      responses:
+        '200':
+          description: Chronological build logs
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BuildLogsResponseEnvelope'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
 # ==========================================
 # COMPONENTS & SCHEMAS
 # ==========================================
@@ -3425,6 +3670,167 @@ components:
               created_at:
                 type: string
                 format: date-time
+      required:
+        - success
+        - data
+
+    TriggerBuildRequest:
+      type: object
+      properties:
+        commit_hash:
+          type: string
+          description: Commit SHA to build (defaults to latest HEAD)
+          example: 9f82ab4d12c3
+        branch:
+          type: string
+          description: Branch to build (defaults to service's configured branch)
+          example: main
+        message:
+          type: string
+          description: Commit or trigger summary message
+          example: Manual trigger via platform API
+        dockerfile_path:
+          type: string
+          description: Custom path to Dockerfile within the repo
+          example: Dockerfile
+        build_args:
+          type: object
+          description: Key-value build-time arguments passed to BuildKit
+          additionalProperties:
+            type: string
+          example:
+            GO_VERSION: "1.24"
+
+    Build:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        service_id:
+          type: string
+          format: uuid
+        commit_hash:
+          type: string
+          example: a1b2c3d4e5f6
+        branch:
+          type: string
+          example: main
+        message:
+          type: string
+          example: Triggered via GitHub Push
+        author:
+          type: string
+          example: developer@example.com
+        status:
+          type: string
+          enum: [queued, building, succeeded, failed, cancelled]
+          example: succeeded
+        image_tag:
+          type: string
+          example: registry.adroit.run/acme/web:a1b2c3d4e5f6
+        image_digest:
+          type: string
+          example: sha256:4f828a1be5b3bc778848d61ab84b5c7e1277be160e4a9eeea3452dcebf58a888
+        duration_ms:
+          type: integer
+          example: 2450
+        triggered_by:
+          type: string
+          example: webhook:github
+        error_message:
+          type: string
+          example: ""
+        created_at:
+          type: string
+          format: date-time
+        finished_at:
+          type: string
+          format: date-time
+      required:
+        - id
+        - service_id
+        - commit_hash
+        - branch
+        - status
+        - triggered_by
+        - created_at
+
+    BuildResponseEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          $ref: '#/components/schemas/Build'
+      required:
+        - success
+        - data
+
+    BuildListResponseEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: object
+          properties:
+            builds:
+              type: array
+              items:
+                $ref: '#/components/schemas/Build'
+            total:
+              type: integer
+              example: 12
+            limit:
+              type: integer
+              example: 20
+            offset:
+              type: integer
+              example: 0
+      required:
+        - success
+        - data
+
+    BuildLogsResponseEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: object
+          properties:
+            build_id:
+              type: string
+              format: uuid
+            logs:
+              type: array
+              items:
+                type: object
+                properties:
+                  id:
+                    type: string
+                    format: uuid
+                  build_id:
+                    type: string
+                    format: uuid
+                  line:
+                    type: string
+                  stream:
+                    type: string
+                    example: stdout
+                  timestamp:
+                    type: string
+                    format: date-time
+            full_log:
+              type: string
+              example: "[+] Building with BuildKit engine\n=> [internal] load build definition from Dockerfile\n=> exporting to image\n[+] Build succeeded!"
+            total_lines:
+              type: integer
+              example: 8
       required:
         - success
         - data
