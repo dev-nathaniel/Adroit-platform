@@ -70,6 +70,13 @@ func main() {
 			Color: colorBlue,
 		},
 		{
+			Name:  "Git Svc",
+			Pkg:   "./cmd/git-integration-service",
+			Bin:   "git-integration-service",
+			Port:  8085,
+			Color: colorMagenta,
+		},
+		{
 			Name:  "API Gateway",
 			Pkg:   "./cmd/api-gateway",
 			Bin:   "api-gateway",

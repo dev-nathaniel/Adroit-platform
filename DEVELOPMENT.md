@@ -157,6 +157,7 @@ Adroit-platform/
 | | API Specifications & Postman | Completed | OpenAPI 3.0.3 (`docs/openapi.yaml`) & Postman Collection v2.1.0 (`docs/adroit-platform.postman_collection.json`) with auto-token chaining. |
 | | All-in-One Dev Runner | Completed | `cmd/adroit-dev`: One-command runner launching Gateway, Auth, User, Notification, and Project services concurrently. |
 | | Project & Service Catalog | Completed | `internal/project-service` & `cmd/project-service`: Projects, standalone services (`project_id=nil`), moving services into/out of projects (`/services/{id}/move`), hierarchical environment variables, and NATS JetStream event publishing. |
+| | Git Integration & Webhooks | Completed | `internal/git-integration-service` & `cmd/git-integration-service`: GitHub & GitLab push/ping webhook ingress, HMAC-SHA256 & token verification, canonical URL normalization (HTTPS, SSH, git://), branch matching, automated build record creation, NATS JetStream event dispatching (`adroit.build.requested`), provider credential linking, and repository/branch discovery. |
 | | Build Service & Worker | Up Next | BuildKit integration and Nomad batch job runner. |
 | | Orchestration & Runtime | Pending | Nomad driver, allocations, health monitoring. |
 | | Ingress & Caddy Routing | Pending | Dynamic edge reverse proxy routing via Consul. |

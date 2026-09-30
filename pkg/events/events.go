@@ -50,6 +50,10 @@ const (
 	// Notification direct events
 	SubjectNotificationEmailSend   = "adroit.notification.email_send"
 	SubjectNotificationWebhookSend = "adroit.notification.webhook_send"
+
+	// Git Integration events
+	SubjectGitPushReceived    = "adroit.git.push_received"
+	SubjectGitWebhookReceived = "adroit.git.webhook_received"
 )
 
 // Event is the universal CloudEvents-like envelope sent across NATS JetStream
@@ -216,6 +220,28 @@ type ServiceMovedPayload struct {
 	OrganizationID string  `json:"organization_id"`
 	OldProjectID   *string `json:"old_project_id,omitempty"`
 	NewProjectID   *string `json:"new_project_id,omitempty"`
+}
+
+// GitPushReceivedPayload is emitted when a push event is processed by git-integration-service
+type GitPushReceivedPayload struct {
+	Provider        string   `json:"provider"` // "github" or "gitlab"
+	RepoURL         string   `json:"repo_url"`
+	Branch          string   `json:"branch"`
+	CommitHash      string   `json:"commit_hash"`
+	CommitMessage   string   `json:"commit_message"`
+	AuthorName      string   `json:"author_name"`
+	AuthorEmail     string   `json:"author_email"`
+	MatchedServices []string `json:"matched_services"`
+	TriggeredBuilds []string `json:"triggered_builds"`
+}
+
+// GitWebhookReceivedPayload is emitted for any received Git webhook event
+type GitWebhookReceivedPayload struct {
+	Provider   string `json:"provider"`
+	EventType  string `json:"event_type"`
+	DeliveryID string `json:"delivery_id,omitempty"`
+	RepoURL    string `json:"repo_url"`
+	Status     string `json:"status"`
 }
 
 

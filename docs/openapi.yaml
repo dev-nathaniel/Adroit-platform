@@ -1542,6 +1542,295 @@ paths:
               schema:
                 $ref: '#/components/schemas/MessageResponseEnvelope'
 
+  # ==========================================
+  # GIT INTEGRATION & WEBHOOKS
+  # ==========================================
+  /api/v1/webhooks/github:
+    post:
+      tags:
+        - Git Webhooks
+      summary: GitHub Webhook Ingress
+      description: Ingests GitHub push and ping webhooks. Verifies HMAC-SHA256 signature using X-Hub-Signature-256 header. Matches registered services, creates builds, and publishes adroit.build.requested.
+      parameters:
+        - name: X-GitHub-Event
+          in: header
+          required: true
+          schema:
+            type: string
+            example: push
+        - name: X-Hub-Signature-256
+          in: header
+          required: false
+          schema:
+            type: string
+            example: sha256=d57...
+        - name: X-GitHub-Delivery
+          in: header
+          required: false
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Webhook processed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebhookResultEnvelope'
+        '401':
+          description: Invalid webhook signature
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+
+  /api/v1/webhooks/gitlab:
+    post:
+      tags:
+        - Git Webhooks
+      summary: GitLab Webhook Ingress
+      description: Ingests GitLab push and system webhooks. Verifies secret token using X-Gitlab-Token header. Matches registered services, creates builds, and emits adroit.build.requested.
+      parameters:
+        - name: X-Gitlab-Event
+          in: header
+          required: false
+          schema:
+            type: string
+            example: Push Hook
+        - name: X-Gitlab-Token
+          in: header
+          required: false
+          schema:
+            type: string
+        - name: X-Gitlab-Delivery
+          in: header
+          required: false
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Webhook processed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebhookResultEnvelope'
+        '401':
+          description: Invalid secret token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+
+  /api/v1/git/providers:
+    get:
+      tags:
+        - Git Integrations
+      summary: List Connected Git Providers
+      description: Returns connected GitHub and GitLab accounts for the authenticated user.
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Connected providers list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GitProvidersListResponseEnvelope'
+
+  /api/v1/git/providers/connect:
+    post:
+      tags:
+        - Git Integrations
+      summary: Connect Git Provider
+      description: Connects a personal access token or OAuth credential for GitHub or GitLab.
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConnectProviderRequest'
+      responses:
+        '200':
+          description: Provider connected successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GitProviderResponseEnvelope'
+
+  /api/v1/git/providers/{provider}:
+    delete:
+      tags:
+        - Git Integrations
+      summary: Disconnect Git Provider
+      description: Unlinks a Git provider connection for the authenticated user.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: provider
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [github, gitlab]
+      responses:
+        '200':
+          description: Provider disconnected
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponseEnvelope'
+
+  /api/v1/git/{provider}/repos:
+    get:
+      tags:
+        - Git Integrations
+      summary: List Repositories
+      description: Discovers remote repositories available from the connected Git account.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: provider
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [github, gitlab]
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 1
+        - name: per_page
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 30
+      responses:
+        '200':
+          description: List of repositories
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GitRepositoriesResponseEnvelope'
+
+  /api/v1/git/{provider}/repos/{owner}/{repo}/branches:
+    get:
+      tags:
+        - Git Integrations
+      summary: List Repository Branches
+      description: Lists branches for a repository to simplify service setup.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: provider
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [github, gitlab]
+        - name: owner
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: repo
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: List of branches
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GitBranchesResponseEnvelope'
+
+  /api/v1/git/services/{id}/webhook:
+    post:
+      tags:
+        - Git Integrations
+      summary: Setup Service Webhook
+      description: Generates a secret and auto-configures a webhook on GitHub or GitLab for this service.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Service UUID
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Webhook setup result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebhookSetupResponseEnvelope'
+
+    get:
+      tags:
+        - Git Integrations
+      summary: Get Service Webhook Info
+      description: Retrieves the webhook URL and secret for manual webhook configuration.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Service UUID
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Webhook info
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceWebhookInfoResponseEnvelope'
+
+  /api/v1/git/webhooks/events:
+    get:
+      tags:
+        - Git Integrations
+      summary: List Webhook Delivery Audit Log
+      description: Returns recent webhook deliveries, matched services, and triggered builds.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 50
+      responses:
+        '200':
+          description: List of webhook events
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebhookEventsResponseEnvelope'
+
 # ==========================================
 # COMPONENTS & SCHEMAS
 # ==========================================
@@ -2853,4 +3142,291 @@ components:
       required:
         - success
         - data
+
+    WebhookResultEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: object
+          properties:
+            status:
+              type: string
+              example: processed
+            provider:
+              type: string
+              example: github
+            event:
+              type: string
+              example: push
+            repo_canonical:
+              type: string
+              example: github.com/adroit-platform/core-api
+            branch:
+              type: string
+              example: main
+            commit_hash:
+              type: string
+              example: 6dcb09b5b5...
+            matched_services:
+              type: array
+              items:
+                type: string
+            builds_triggered:
+              type: array
+              items:
+                type: string
+            message:
+              type: string
+      required:
+        - success
+        - data
+
+    ConnectProviderRequest:
+      type: object
+      properties:
+        provider:
+          type: string
+          enum: [github, gitlab]
+        access_token:
+          type: string
+        base_url:
+          type: string
+          description: Optional custom base URL for self-hosted GitLab
+      required:
+        - provider
+        - access_token
+
+    GitProvider:
+      type: object
+      properties:
+        id:
+          type: string
+        user_id:
+          type: string
+        provider:
+          type: string
+          enum: [github, gitlab]
+        username:
+          type: string
+        display_name:
+          type: string
+        avatar_url:
+          type: string
+        base_url:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required:
+        - id
+        - user_id
+        - provider
+        - username
+
+    GitProviderResponseEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          $ref: '#/components/schemas/GitProvider'
+      required:
+        - success
+        - data
+
+    GitProvidersListResponseEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/GitProvider'
+      required:
+        - success
+        - data
+
+    GitRepository:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        full_name:
+          type: string
+        owner:
+          type: string
+        html_url:
+          type: string
+        clone_url:
+          type: string
+        ssh_url:
+          type: string
+        default_branch:
+          type: string
+        is_private:
+          type: boolean
+        description:
+          type: string
+        updated_at:
+          type: string
+      required:
+        - id
+        - name
+        - full_name
+        - clone_url
+
+    GitRepositoriesResponseEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/GitRepository'
+      required:
+        - success
+        - data
+
+    GitBranch:
+      type: object
+      properties:
+        name:
+          type: string
+        commit_sha:
+          type: string
+        is_default:
+          type: boolean
+        protected:
+          type: boolean
+      required:
+        - name
+        - commit_sha
+
+    GitBranchesResponseEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/GitBranch'
+      required:
+        - success
+        - data
+
+    WebhookSetupResponseEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: object
+          properties:
+            service_id:
+              type: string
+            provider:
+              type: string
+            webhook_id:
+              type: string
+            webhook_url:
+              type: string
+            webhook_secret:
+              type: string
+            auto_configured:
+              type: boolean
+            instructions:
+              type: string
+      required:
+        - success
+        - data
+
+    ServiceWebhookInfoResponseEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: object
+          properties:
+            service_id:
+              type: string
+            repo_url:
+              type: string
+            branch:
+              type: string
+            webhook_url:
+              type: string
+            webhook_secret:
+              type: string
+            instructions:
+              type: string
+      required:
+        - success
+        - data
+
+    WebhookEventsResponseEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+              provider:
+                type: string
+              event_type:
+                type: string
+              delivery_id:
+                type: string
+              repo_url:
+                type: string
+              branch:
+                type: string
+              commit_hash:
+                type: string
+              commit_message:
+                type: string
+              author:
+                type: string
+              status:
+                type: string
+              error_message:
+                type: string
+              matched_services:
+                type: array
+                items:
+                  type: string
+              triggered_builds:
+                type: array
+                items:
+                  type: string
+              created_at:
+                type: string
+                format: date-time
+      required:
+        - success
+        - data
+
 

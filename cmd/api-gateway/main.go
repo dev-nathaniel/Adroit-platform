@@ -25,6 +25,7 @@ type DownstreamConfig struct {
 	UserServiceURL         string
 	NotificationServiceURL string
 	ProjectServiceURL      string
+	GitServiceURL          string
 }
 
 // SetupRouter creates and configures the Chi router, middleware chain, and service proxies
@@ -101,6 +102,14 @@ func SetupRouter(log *slog.Logger, rl *middleware.RateLimiter, downstreams Downs
 		}
 	}
 
+	if downstreams.GitServiceURL != "" {
+		if gitProxy, err := apigateway.CreateServiceProxy("git-integration-service", downstreams.GitServiceURL, log); err == nil {
+			r.Mount("/api/v1/git", gitProxy)
+			r.Mount("/api/v1/webhooks", gitProxy)
+			log.Info("Mounted proxy for git-integration-service", slog.String("target", downstreams.GitServiceURL))
+		}
+	}
+
 	// 7. Custom 404 & 405 Handlers
 	r.NotFound(func(w http.ResponseWriter, r *http.Request) {
 		response.NotFound(w, fmt.Sprintf("Route %s %s not found", r.Method, r.URL.Path))
@@ -124,6 +133,7 @@ func main() {
 		UserServiceURL:         config.GetEnv("USER_SERVICE_URL", "http://localhost:8082"),
 		NotificationServiceURL: config.GetEnv("NOTIFICATION_SERVICE_URL", "http://localhost:8083"),
 		ProjectServiceURL:      config.GetEnv("PROJECT_SERVICE_URL", "http://localhost:8084"),
+		GitServiceURL:          config.GetEnv("GIT_SERVICE_URL", "http://localhost:8085"),
 	}
 
 	// 2. Initialize structured logger
@@ -141,6 +151,7 @@ func main() {
 		slog.String("user_service_url", downstreams.UserServiceURL),
 		slog.String("notification_service_url", downstreams.NotificationServiceURL),
 		slog.String("project_service_url", downstreams.ProjectServiceURL),
+		slog.String("git_service_url", downstreams.GitServiceURL),
 	)
 
 	// 3. Initialize Rate Limiter

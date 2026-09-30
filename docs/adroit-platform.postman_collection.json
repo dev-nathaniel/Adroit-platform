@@ -1366,6 +1366,316 @@
 					"response": []
 				}
 			]
+		},
+		{
+			"name": "5. Git Integration & Webhooks",
+			"item": [
+				{
+					"name": "GitHub Webhook (Push)",
+					"request": {
+						"auth": {
+							"type": "noauth"
+						},
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "X-GitHub-Event",
+								"value": "push"
+							},
+							{
+								"key": "X-GitHub-Delivery",
+								"value": "del_sample_123"
+							},
+							{
+								"key": "X-Hub-Signature-256",
+								"value": "sha256=optional_or_valid_hmac_hex"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"ref\": \"refs/heads/main\",\n  \"after\": \"6dcb09b5b57875f334f61aebed695e2e4193db5e\",\n  \"repository\": {\n    \"name\": \"core-api\",\n    \"full_name\": \"adroit-platform/core-api\",\n    \"clone_url\": \"https://github.com/adroit-platform/core-api.git\"\n  },\n  \"pusher\": {\n    \"name\": \"octocat\",\n    \"email\": \"octocat@adroit.run\"\n  },\n  \"head_commit\": {\n    \"id\": \"6dcb09b5b57875f334f61aebed695e2e4193db5e\",\n    \"message\": \"feat: add payments integration\",\n    \"author\": {\n      \"name\": \"Mona Lisa\",\n      \"email\": \"mona@adroit.run\"\n    }\n  }\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/webhooks/github",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"webhooks",
+								"github"
+							]
+						},
+						"description": "Ingests push webhooks from GitHub, verifies HMAC-SHA256 signature, matches registered services, creates builds, and dispatches adroit.build.requested events."
+					},
+					"response": []
+				},
+				{
+					"name": "GitLab Webhook (Push)",
+					"request": {
+						"auth": {
+							"type": "noauth"
+						},
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "X-Gitlab-Event",
+								"value": "Push Hook"
+							},
+							{
+								"key": "X-Gitlab-Delivery",
+								"value": "del_gl_123"
+							},
+							{
+								"key": "X-Gitlab-Token",
+								"value": "gl_secret_token"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"object_kind\": \"push\",\n  \"ref\": \"refs/heads/main\",\n  \"checkout_sha\": \"da1560886d4f094c3e6c9ef40349f7d38b5d27d7\",\n  \"user_name\": \"John Smith\",\n  \"user_email\": \"john@adroit.run\",\n  \"project\": {\n    \"name\": \"billing-service\",\n    \"git_http_url\": \"https://gitlab.com/adroit/billing-service.git\"\n  },\n  \"commits\": [\n    {\n      \"id\": \"da1560886d4f094c3e6c9ef40349f7d38b5d27d7\",\n      \"message\": \"fix: resolve invoice calculation issue\",\n      \"author\": {\n        \"name\": \"John Smith\",\n        \"email\": \"john@adroit.run\"\n      }\n    }\n  ]\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/webhooks/gitlab",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"webhooks",
+								"gitlab"
+							]
+						},
+						"description": "Ingests push webhooks from GitLab, verifies secret token, matches services, creates builds, and publishes NATS JetStream events."
+					},
+					"response": []
+				},
+				{
+					"name": "List Connected Providers",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/git/providers",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"git",
+								"providers"
+							]
+						},
+						"description": "Returns connected Git providers (GitHub / GitLab) for the authenticated user."
+					},
+					"response": []
+				},
+				{
+					"name": "Connect Git Provider",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"provider\": \"github\",\n  \"access_token\": \"ghp_your_personal_access_token_here\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/git/providers/connect",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"git",
+								"providers",
+								"connect"
+							]
+						},
+						"description": "Links a personal access token or OAuth credential for GitHub or GitLab."
+					},
+					"response": []
+				},
+				{
+					"name": "List GitHub Repositories",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/git/github/repos?page=1&per_page=30",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"git",
+								"github",
+								"repos"
+							],
+							"query": [
+								{
+									"key": "page",
+									"value": "1"
+								},
+								{
+									"key": "per_page",
+									"value": "30"
+								}
+							]
+						},
+						"description": "Discovers repositories accessible by the user's connected GitHub account."
+					},
+					"response": []
+				},
+				{
+					"name": "List GitLab Projects",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/git/gitlab/repos?page=1&per_page=30",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"git",
+								"gitlab",
+								"repos"
+							],
+							"query": [
+								{
+									"key": "page",
+									"value": "1"
+								},
+								{
+									"key": "per_page",
+									"value": "30"
+								}
+							]
+						},
+						"description": "Discovers projects/repositories accessible by the user's connected GitLab account."
+					},
+					"response": []
+				},
+				{
+					"name": "List Repository Branches",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/git/github/repos/adroit-platform/core-api/branches",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"git",
+								"github",
+								"repos",
+								"adroit-platform",
+								"core-api",
+								"branches"
+							]
+						},
+						"description": "Lists branches for a given repository to facilitate service configuration."
+					},
+					"response": []
+				},
+				{
+					"name": "Setup Service Webhook",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/git/services/{{serviceId}}/webhook",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"git",
+								"services",
+								"{{serviceId}}",
+								"webhook"
+							]
+						},
+						"description": "Generates a unique per-service webhook secret and registers the webhook automatically on GitHub or GitLab."
+					},
+					"response": []
+				},
+				{
+					"name": "Get Service Webhook Info",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/git/services/{{serviceId}}/webhook",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"git",
+								"services",
+								"{{serviceId}}",
+								"webhook"
+							]
+						},
+						"description": "Retrieves the payload URL, configured secret, and setup instructions for manual webhook configuration."
+					},
+					"response": []
+				},
+				{
+					"name": "Audit Log - Webhook Events",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/git/webhooks/events?limit=25",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"git",
+								"webhooks",
+								"events"
+							],
+							"query": [
+								{
+									"key": "limit",
+									"value": "25"
+								}
+							]
+						},
+						"description": "Lists historical webhook deliveries, matched service IDs, triggered build IDs, and processing errors."
+					},
+					"response": []
+				}
+			]
 		}
 	]
 }

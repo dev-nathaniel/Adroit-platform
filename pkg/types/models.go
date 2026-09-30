@@ -158,6 +158,7 @@ type Service struct {
 	MaxReplicas    int               `json:"max_replicas"`
 	Resources      ResourceLimits    `json:"resources"`
 	HealthCheck    HealthCheckConfig `json:"health_check"`
+	WebhookSecret  string            `json:"webhook_secret,omitempty"`
 	CreatedAt      time.Time         `json:"created_at"`
 	UpdatedAt      time.Time         `json:"updated_at"`
 }
@@ -232,3 +233,75 @@ type Domain struct {
 	CreatedAt  time.Time `json:"created_at"`
 	UpdatedAt  time.Time `json:"updated_at"`
 }
+
+// GitProviderType defines supported VCS providers
+type GitProviderType string
+
+const (
+	GitProviderGitHub GitProviderType = "github"
+	GitProviderGitLab GitProviderType = "gitlab"
+)
+
+// GitProviderConnection represents a connected user account on GitHub/GitLab
+type GitProviderConnection struct {
+	ID          string          `json:"id"`
+	UserID      string          `json:"user_id"`
+	Provider    GitProviderType `json:"provider"`
+	Username    string          `json:"username"`
+	DisplayName string          `json:"display_name,omitempty"`
+	AvatarURL   string          `json:"avatar_url,omitempty"`
+	BaseURL     string          `json:"base_url,omitempty"`
+	CreatedAt   time.Time       `json:"created_at"`
+	UpdatedAt   time.Time       `json:"updated_at"`
+}
+
+// GitWebhookEventRecord represents an audit log entry for received webhooks
+type GitWebhookEventRecord struct {
+	ID              string    `json:"id"`
+	Provider        string    `json:"provider"`
+	EventType       string    `json:"event_type"`
+	DeliveryID      string    `json:"delivery_id,omitempty"`
+	RepoURL         string    `json:"repo_url"`
+	Branch          string    `json:"branch,omitempty"`
+	CommitHash      string    `json:"commit_hash,omitempty"`
+	CommitMessage   string    `json:"commit_message,omitempty"`
+	Author          string    `json:"author,omitempty"`
+	Status          string    `json:"status"`
+	ErrorMessage    string    `json:"error_message,omitempty"`
+	MatchedServices []string  `json:"matched_services"`
+	TriggeredBuilds []string  `json:"triggered_builds"`
+	CreatedAt       time.Time `json:"created_at"`
+}
+
+// GitRepository represents a repository discovered from GitHub or GitLab
+type GitRepository struct {
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	FullName      string `json:"full_name"`
+	Owner         string `json:"owner"`
+	HTMLURL       string `json:"html_url"`
+	CloneURL      string `json:"clone_url"`
+	SSHURL        string `json:"ssh_url,omitempty"`
+	DefaultBranch string `json:"default_branch"`
+	IsPrivate     bool   `json:"is_private"`
+	Description   string `json:"description,omitempty"`
+	UpdatedAt     string `json:"updated_at,omitempty"`
+}
+
+// GitBranch represents a branch in a repository
+type GitBranch struct {
+	Name      string `json:"name"`
+	CommitSHA string `json:"commit_sha"`
+	IsDefault bool   `json:"is_default"`
+	Protected bool   `json:"protected"`
+}
+
+// GitCommitInfo represents metadata about a commit
+type GitCommitInfo struct {
+	SHA       string    `json:"sha"`
+	Message   string    `json:"message"`
+	Author    string    `json:"author"`
+	Email     string    `json:"email"`
+	Timestamp time.Time `json:"timestamp"`
+}
+
