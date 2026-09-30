@@ -20,12 +20,13 @@ import (
 
 // ANSI Color Codes
 const (
-	colorReset  = "\033[0m"
-	colorCyan   = "\033[36m"
-	colorGreen  = "\033[32m"
-	colorYellow = "\033[33m"
-	colorRed    = "\033[31m"
-	colorBold   = "\033[1m"
+	colorReset   = "\033[0m"
+	colorCyan    = "\033[36m"
+	colorGreen   = "\033[32m"
+	colorYellow  = "\033[33m"
+	colorMagenta = "\033[35m"
+	colorRed     = "\033[31m"
+	colorBold    = "\033[1m"
 )
 
 // ServiceDef defines an actual microservice binary to build and supervise
@@ -52,6 +53,13 @@ func main() {
 			Bin:   "user-service",
 			Port:  8082,
 			Color: colorYellow,
+		},
+		{
+			Name:  "Notification Svc",
+			Pkg:   "./cmd/notification-service",
+			Bin:   "notification-service",
+			Port:  8083,
+			Color: colorMagenta,
 		},
 		{
 			Name:  "API Gateway",

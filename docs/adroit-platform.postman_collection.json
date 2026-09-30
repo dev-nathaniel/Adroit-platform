@@ -620,6 +620,134 @@
 					"response": []
 				}
 			]
+		},
+		{
+			"name": "6. Notification Service",
+			"item": [
+				{
+					"name": "Health Check (Notifications)",
+					"request": {
+						"auth": {
+							"type": "noauth"
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/notifications/healthz",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"notifications",
+								"healthz"
+							]
+						},
+						"description": "Returns operational health and active delivery providers of the Notification Service."
+					},
+					"response": []
+				},
+				{
+					"name": "Send Email (Templated / Custom)",
+					"request": {
+						"auth": {
+							"type": "noauth"
+						},
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"to\": [\"developer@example.com\"],\n  \"subject\": \"Welcome to Adroit Platform\",\n  \"template\": \"welcome\",\n  \"data\": {\n    \"Name\": \"Alex\",\n    \"DashboardURL\": \"http://localhost:3000/dashboard\"\n  }\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/notifications/email",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"notifications",
+								"email"
+							]
+						},
+						"description": "Dispatches a transactional email using a pre-compiled platform template or custom HTML/text body."
+					},
+					"response": []
+				},
+				{
+					"name": "Send Webhook (HMAC Signed)",
+					"request": {
+						"auth": {
+							"type": "noauth"
+						},
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"url\": \"https://httpbin.org/post\",\n  \"event\": \"deployment.healthy\",\n  \"secret\": \"whsec_supersecretkey123\",\n  \"payload\": {\n    \"deployment_id\": \"dep_12345\",\n    \"service\": \"api-gateway\",\n    \"status\": \"ready\"\n  }\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/notifications/webhook",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"notifications",
+								"webhook"
+							]
+						},
+						"description": "Delivers an outbound HTTP webhook with exponential retry and HMAC-SHA256 signature header."
+					},
+					"response": []
+				},
+				{
+					"name": "Simulate Invite Email",
+					"request": {
+						"auth": {
+							"type": "noauth"
+						},
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"email\": \"teammate@example.com\",\n  \"organization_name\": \"Acme Cloud\",\n  \"invited_by_name\": \"Lead Architect\",\n  \"role\": \"admin\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/notifications/test-invite",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"notifications",
+								"test-invite"
+							]
+						},
+						"description": "Simulates rendering and sending an organization member invitation email."
+					},
+					"response": []
+				}
+			]
 		}
 	]
 }

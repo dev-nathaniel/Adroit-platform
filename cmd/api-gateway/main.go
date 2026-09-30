@@ -21,8 +21,9 @@ import (
 
 // DownstreamConfig holds target service URLs for reverse proxy routing
 type DownstreamConfig struct {
-	AuthServiceURL string
-	UserServiceURL string
+	AuthServiceURL         string
+	UserServiceURL         string
+	NotificationServiceURL string
 }
 
 // SetupRouter creates and configures the Chi router, middleware chain, and service proxies
@@ -84,6 +85,13 @@ func SetupRouter(log *slog.Logger, rl *middleware.RateLimiter, downstreams Downs
 		}
 	}
 
+	if downstreams.NotificationServiceURL != "" {
+		if notifProxy, err := apigateway.CreateServiceProxy("notification-service", downstreams.NotificationServiceURL, log); err == nil {
+			r.Mount("/api/v1/notifications", notifProxy)
+			log.Info("Mounted proxy for notification-service", slog.String("target", downstreams.NotificationServiceURL))
+		}
+	}
+
 	// 7. Custom 404 & 405 Handlers
 	r.NotFound(func(w http.ResponseWriter, r *http.Request) {
 		response.NotFound(w, fmt.Sprintf("Route %s %s not found", r.Method, r.URL.Path))
@@ -103,8 +111,9 @@ func main() {
 	rateLimitBurst := config.GetEnvInt("RATE_LIMIT_BURST", 100)
 
 	downstreams := DownstreamConfig{
-		AuthServiceURL: config.GetEnv("AUTH_SERVICE_URL", "http://localhost:8081"),
-		UserServiceURL: config.GetEnv("USER_SERVICE_URL", "http://localhost:8082"),
+		AuthServiceURL:         config.GetEnv("AUTH_SERVICE_URL", "http://localhost:8081"),
+		UserServiceURL:         config.GetEnv("USER_SERVICE_URL", "http://localhost:8082"),
+		NotificationServiceURL: config.GetEnv("NOTIFICATION_SERVICE_URL", "http://localhost:8083"),
 	}
 
 	// 2. Initialize structured logger
@@ -120,6 +129,7 @@ func main() {
 		slog.Int("rate_limit_burst", rateLimitBurst),
 		slog.String("auth_service_url", downstreams.AuthServiceURL),
 		slog.String("user_service_url", downstreams.UserServiceURL),
+		slog.String("notification_service_url", downstreams.NotificationServiceURL),
 	)
 
 	// 3. Initialize Rate Limiter

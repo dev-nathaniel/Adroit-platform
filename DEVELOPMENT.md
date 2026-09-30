@@ -153,8 +153,9 @@ Adroit-platform/
 | | Identity & Crypto Primitives | Completed | `pkg/identity` for bcrypt password hashing (cost 12) and HMAC-SHA256 JWT tokens. |
 | | Auth Service | Completed | `internal/auth-service` & `cmd/auth-service`: Register, Login, Me, auto-workspace creation, rate limiting. |
 | | User & Organization Service | Completed | `internal/user-service` & `cmd/user-service`: User profiles, multi-tenant orgs, team memberships & RBAC. |
+| | Notification Service & Event Backbone | Completed | `internal/notification-service`, `cmd/notification-service`, `pkg/events`: NATS JetStream & InMem EventBus, invite email rendering, SMTP & Console providers, signed webhooks with HMAC-SHA256 & backoff. |
 | | API Specifications & Postman | Completed | OpenAPI 3.0.3 (`docs/openapi.yaml`) & Postman Collection v2.1.0 (`docs/adroit-platform.postman_collection.json`) with auto-token chaining. |
-| | All-in-One Dev Runner | Completed | `cmd/adroit-dev`: One-command runner launching Gateway, Auth, and User services concurrently. |
+| | All-in-One Dev Runner | Completed | `cmd/adroit-dev`: One-command runner launching Gateway, Auth, User, and Notification services concurrently. |
 | | Project & Service Catalog | Up Next | Defining projects, environments, service resources (vCPU, RAM), and git repos. |
 | | Build Service & Worker | Pending | BuildKit integration and Nomad batch job runner. |
 | | Orchestration & Runtime | Pending | Nomad driver, allocations, health monitoring. |

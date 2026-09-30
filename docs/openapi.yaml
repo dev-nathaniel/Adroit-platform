@@ -42,6 +42,8 @@ servers:
     description: Auth Service (Direct Microservice Port)
   - url: http://localhost:8082
     description: User & Organization Service (Direct Microservice Port)
+  - url: http://localhost:8083
+    description: Notification Service (Direct Microservice Port)
 
 tags:
   - name: System & Gateway
@@ -54,6 +56,8 @@ tags:
     description: Multi-tenant workspace management, memberships, and role assignments
   - name: Organization Invitations
     description: Team invitation lifecycle (create, preview, accept, list, revoke)
+  - name: Notifications
+    description: Transactional email dispatch, webhook sending, and invitation simulation
 
 paths:
   # ==========================================
@@ -681,6 +685,106 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponseEnvelope'
 
+  # ==========================================
+  # NOTIFICATIONS & COMMUNICATIONS
+  # ==========================================
+  /api/v1/notifications/email:
+    post:
+      tags:
+        - Notifications
+      summary: Send Transactional Email
+      description: |
+        Dispatches a transactional email to one or more recipients. Supports either pre-compiled platform
+        templates (`org_invitation`, `welcome`, `alert`) with a variables dictionary or direct HTML / plain-text bodies.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SendEmailRequest'
+      responses:
+        '200':
+          description: Email dispatched successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmailDispatchedResponseEnvelope'
+        '400':
+          description: Missing recipients, subject, or message body/template
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '500':
+          description: Outbound delivery failure from configured email provider
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+
+  /api/v1/notifications/webhook:
+    post:
+      tags:
+        - Notifications
+      summary: Dispatch Outbound Webhook
+      description: |
+        Sends a JSON webhook to an external URL with automated exponential backoff retries.
+        If a `secret` is provided, an HMAC-SHA256 signature is automatically computed and attached
+        in the `X-Adroit-Signature: sha256=<hex>` header for recipient verification.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SendWebhookRequest'
+      responses:
+        '200':
+          description: Webhook delivered successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebhookDispatchedResponseEnvelope'
+        '400':
+          description: Invalid request payload or missing URL
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '500':
+          description: Webhook delivery failed after all retry attempts
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+
+  /api/v1/notifications/test-invite:
+    post:
+      tags:
+        - Notifications
+      summary: Simulate Organization Invite Email
+      description: |
+        Renders the full HTML & plain-text organization invitation email template and sends it via
+        the active provider (Console preview in development, or SMTP in production).
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TestInviteRequest'
+      responses:
+        '200':
+          description: Test invitation dispatched successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TestInviteResponseEnvelope'
+        '500':
+          description: Template rendering or provider dispatch error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+
 # ==========================================
 # COMPONENTS & SCHEMAS
 # ==========================================
@@ -1301,6 +1405,175 @@ components:
           example: true
         data:
           $ref: '#/components/schemas/AcceptInvitationResponse'
+      required:
+        - success
+        - data
+
+    # --- Notification Schemas ---
+    SendEmailRequest:
+      type: object
+      required:
+        - to
+      properties:
+        to:
+          type: array
+          items:
+            type: string
+            format: email
+          example: ["developer@example.com"]
+        subject:
+          type: string
+          example: "Welcome to Adroit Platform"
+        template:
+          type: string
+          description: Optional pre-compiled template name (`org_invitation`, `welcome`, `alert`)
+          example: "welcome"
+        data:
+          type: object
+          description: Template key-value data variables
+          example:
+            Name: "Alex"
+            DashboardURL: "https://adroit.run/dashboard"
+        html_body:
+          type: string
+          description: Custom HTML body if template is not specified
+          example: "<h1>Hello!</h1>"
+        plain_body:
+          type: string
+          description: Custom plain-text body
+          example: "Hello from Adroit!"
+
+    SendWebhookRequest:
+      type: object
+      required:
+        - url
+      properties:
+        url:
+          type: string
+          format: uri
+          example: "https://hooks.slack.com/services/T00/B00/XXXX"
+        event:
+          type: string
+          example: "deployment.healthy"
+        secret:
+          type: string
+          description: Shared secret for HMAC-SHA256 signature calculation in `X-Adroit-Signature`
+          example: "whsec_supersecretkey"
+        headers:
+          type: object
+          additionalProperties:
+            type: string
+          example:
+            X-Custom-Env: "production"
+        payload:
+          type: object
+          description: JSON serializable webhook payload
+          example:
+            project_id: "proj_123"
+            status: "ready"
+
+    TestInviteRequest:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+          example: "colleague@example.com"
+        organization_name:
+          type: string
+          example: "Acme Cloud"
+        invited_by_name:
+          type: string
+          example: "Sarah Connor"
+        role:
+          type: string
+          enum: [admin, member]
+          example: "admin"
+
+    EmailDispatchedResponse:
+      type: object
+      properties:
+        dispatched:
+          type: boolean
+          example: true
+        provider:
+          type: string
+          example: "console"
+        recipients:
+          type: array
+          items:
+            type: string
+          example: ["developer@example.com"]
+      required:
+        - dispatched
+        - provider
+        - recipients
+
+    EmailDispatchedResponseEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          $ref: '#/components/schemas/EmailDispatchedResponse'
+      required:
+        - success
+        - data
+
+    WebhookDispatchedResponse:
+      type: object
+      properties:
+        dispatched:
+          type: boolean
+          example: true
+        url:
+          type: string
+          example: "https://hooks.slack.com/services/T00/B00/XXXX"
+        event:
+          type: string
+          example: "deployment.healthy"
+      required:
+        - dispatched
+        - url
+
+    WebhookDispatchedResponseEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          $ref: '#/components/schemas/WebhookDispatchedResponse'
+      required:
+        - success
+        - data
+
+    TestInviteResponse:
+      type: object
+      properties:
+        message:
+          type: string
+          example: "Test invitation email dispatched successfully"
+        recipient:
+          type: string
+          example: "colleague@example.com"
+        provider:
+          type: string
+          example: "console"
+      required:
+        - message
+        - recipient
+        - provider
+
+    TestInviteResponseEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          $ref: '#/components/schemas/TestInviteResponse'
       required:
         - success
         - data
