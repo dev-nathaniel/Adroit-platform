@@ -12,7 +12,7 @@ The `middleware` package provides production-grade HTTP middlewares compatible w
 
 ### `middleware.Logging(log *slog.Logger)`
 * **Signature:** `func(*slog.Logger) func(http.Handler) http.Handler`
-* **Function:** Logs each incoming HTTP request using structured JSON. Records `request_id`, HTTP `method`, `path`, `status` code, elapsed `duration`, `remote_addr`, and `user_agent`.
+* **Function:** Logs each incoming HTTP request using structured JSON. Records `request_id`, HTTP `method`, `path`, `status` code, elapsed `duration`, payload metrics (`bytes_in` request payload size, `bytes_out` response body size), `remote_addr`, and `user_agent`.
 
 ### `middleware.Recovery(log *slog.Logger)`
 * **Signature:** `func(*slog.Logger) func(http.Handler) http.Handler`

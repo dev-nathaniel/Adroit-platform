@@ -65,3 +65,78 @@ func TestCORS(t *testing.T) {
 		t.Errorf("expected Access-Control-Allow-Origin: *, got '%s'", allowOrigin)
 	}
 }
+
+func TestLogging(t *testing.T) {
+	t.Run("records request and response sizes and status", func(t *testing.T) {
+		var logBuf bytes.Buffer
+		log := logger.New(logger.Config{
+			Format: "json",
+			Output: &logBuf,
+		})
+
+		handler := middleware.Logging(log)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte("created resource"))
+		}))
+
+		body := bytes.NewBufferString("input payload")
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/test-endpoint", body)
+
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("expected status 201, got %d", rec.Code)
+		}
+		if rec.Body.String() != "created resource" {
+			t.Fatalf("unexpected body: %s", rec.Body.String())
+		}
+
+		logOutput := logBuf.String()
+		if !bytes.Contains(logBuf.Bytes(), []byte(`"bytes_in":13`)) {
+			t.Errorf("expected bytes_in 13 in log output, got: %s", logOutput)
+		}
+		if !bytes.Contains(logBuf.Bytes(), []byte(`"bytes_out":16`)) {
+			t.Errorf("expected bytes_out 16 in log output, got: %s", logOutput)
+		}
+		if !bytes.Contains(logBuf.Bytes(), []byte(`"status":201`)) {
+			t.Errorf("expected status 201 in log output, got: %s", logOutput)
+		}
+		if !bytes.Contains(logBuf.Bytes(), []byte(`"method":"POST"`)) {
+			t.Errorf("expected method POST in log output, got: %s", logOutput)
+		}
+	})
+
+	t.Run("handles implicit status 200 on write", func(t *testing.T) {
+		var logBuf bytes.Buffer
+		log := logger.New(logger.Config{
+			Format: "json",
+			Output: &logBuf,
+		})
+
+		handler := middleware.Logging(log)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, _ = w.Write([]byte("ok"))
+		}))
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/health", nil)
+
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected status 200, got %d", rec.Code)
+		}
+
+		logOutput := logBuf.String()
+		if !bytes.Contains(logBuf.Bytes(), []byte(`"bytes_out":2`)) {
+			t.Errorf("expected bytes_out 2 in log output, got: %s", logOutput)
+		}
+		if !bytes.Contains(logBuf.Bytes(), []byte(`"bytes_in":0`)) {
+			t.Errorf("expected bytes_in 0 in log output, got: %s", logOutput)
+		}
+		if !bytes.Contains(logBuf.Bytes(), []byte(`"status":200`)) {
+			t.Errorf("expected status 200 in log output, got: %s", logOutput)
+		}
+	})
+}
+

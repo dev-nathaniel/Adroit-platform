@@ -11,15 +11,39 @@ import (
 	"github.com/dev-nathaniel/Adroit-platform/pkg/response"
 )
 
-// ResponseWriter wrapper to capture HTTP status code
+// ResponseWriter wrapper to capture HTTP status code and response body size
 type statusResponseWriter struct {
 	http.ResponseWriter
-	statusCode int
+	statusCode   int
+	bytesWritten int64
+	wroteHeader  bool
 }
 
 func (rw *statusResponseWriter) WriteHeader(code int) {
-	rw.statusCode = code
-	rw.ResponseWriter.WriteHeader(code)
+	if !rw.wroteHeader {
+		rw.statusCode = code
+		rw.wroteHeader = true
+		rw.ResponseWriter.WriteHeader(code)
+	}
+}
+
+func (rw *statusResponseWriter) Write(b []byte) (int, error) {
+	if !rw.wroteHeader {
+		rw.WriteHeader(http.StatusOK)
+	}
+	n, err := rw.ResponseWriter.Write(b)
+	rw.bytesWritten += int64(n)
+	return n, err
+}
+
+func (rw *statusResponseWriter) Unwrap() http.ResponseWriter {
+	return rw.ResponseWriter
+}
+
+func (rw *statusResponseWriter) Flush() {
+	if flusher, ok := rw.ResponseWriter.(http.Flusher); ok {
+		flusher.Flush()
+	}
 }
 
 // RequestID middleware assigns or propagates an X-Request-ID header
@@ -41,17 +65,25 @@ func RequestID(next http.Handler) http.Handler {
 	})
 }
 
-// Logging middleware logs each HTTP request and duration with slog
+// Logging middleware logs each HTTP request, duration, and payload metrics with slog
 func Logging(log *slog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			start := time.Now()
-			wrapped := &statusResponseWriter{ResponseWriter: w, statusCode: http.StatusOK}
+			wrapped := &statusResponseWriter{
+				ResponseWriter: w,
+				statusCode:     http.StatusOK,
+			}
 
 			next.ServeHTTP(wrapped, r)
 
 			duration := time.Since(start)
 			reqID := logger.GetRequestID(r.Context())
+
+			bytesIn := r.ContentLength
+			if bytesIn < 0 {
+				bytesIn = 0
+			}
 
 			log.InfoContext(r.Context(), "HTTP Request",
 				slog.String("request_id", reqID),
@@ -59,6 +91,8 @@ func Logging(log *slog.Logger) func(http.Handler) http.Handler {
 				slog.String("path", r.URL.Path),
 				slog.Int("status", wrapped.statusCode),
 				slog.Duration("duration", duration),
+				slog.Int64("bytes_in", bytesIn),
+				slog.Int64("bytes_out", wrapped.bytesWritten),
 				slog.String("remote_addr", r.RemoteAddr),
 				slog.String("user_agent", r.UserAgent()),
 			)
