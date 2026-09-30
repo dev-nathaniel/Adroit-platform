@@ -15,6 +15,7 @@ import (
 	userservice "github.com/dev-nathaniel/Adroit-platform/internal/user-service"
 	"github.com/dev-nathaniel/Adroit-platform/pkg/config"
 	"github.com/dev-nathaniel/Adroit-platform/pkg/database"
+	"github.com/dev-nathaniel/Adroit-platform/pkg/events"
 	"github.com/dev-nathaniel/Adroit-platform/pkg/logger"
 	"github.com/dev-nathaniel/Adroit-platform/pkg/middleware"
 	"github.com/dev-nathaniel/Adroit-platform/pkg/response"
@@ -50,11 +51,28 @@ func main() {
 
 	repo := userservice.NewPostgresRepository(db)
 
-	// 3. Service & Handlers
-	svc := userservice.NewService(repo)
+	// 3. Connect to NATS JetStream or fallback to InMemBus
+	natsURL := config.GetEnv("NATS_URL", "nats://localhost:4222")
+	var eventBus events.EventBus
+	natsBus, err := events.NewNATSBus(events.NATSConfig{
+		URL:        natsURL,
+		ClientName: "user-service",
+		Timeout:    3 * time.Second,
+	}, log)
+	if err != nil {
+		log.Warn("NATS unreachable, running user-service with InMemBus fallback", slog.Any("error", err))
+		eventBus = events.NewInMemBus()
+	} else {
+		log.Info("Connected to NATS JetStream backbone", slog.String("url", natsURL))
+		eventBus = natsBus
+	}
+	defer eventBus.Close()
+
+	// 4. Service & Handlers
+	svc := userservice.NewService(repo, userservice.WithPublisher(eventBus))
 	handler := userservice.NewHandler(svc)
 
-	// 4. Chi Router
+	// 5. Chi Router
 	r := chi.NewRouter()
 	rl := middleware.NewRateLimiter(50.0, 100)
 	defer rl.Stop()

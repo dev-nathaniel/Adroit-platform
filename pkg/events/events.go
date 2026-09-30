@@ -37,6 +37,15 @@ const (
 
 	// Service scaling events
 	SubjectServiceScaleRequested = "adroit.service.scale_requested"
+
+	// Organization & User events
+	SubjectOrgMemberInvited = "adroit.org.member_invited"
+	SubjectOrgMemberJoined  = "adroit.org.member_joined"
+	SubjectUserRegistered   = "adroit.user.registered"
+
+	// Notification direct events
+	SubjectNotificationEmailSend   = "adroit.notification.email_send"
+	SubjectNotificationWebhookSend = "adroit.notification.webhook_send"
 )
 
 // Event is the universal CloudEvents-like envelope sent across NATS JetStream
@@ -113,3 +122,37 @@ type DatabaseProvisionPayload struct {
 	Version       string             `json:"version"`
 	StorageSizeGB int                `json:"storage_size_gb"`
 }
+
+// OrgMemberInvitedPayload is emitted when an invitation is issued for an organization
+type OrgMemberInvitedPayload struct {
+	InvitationID     string    `json:"invitation_id"`
+	OrganizationID   string    `json:"organization_id"`
+	OrganizationName string    `json:"organization_name"`
+	Email            string    `json:"email"`
+	Role             string    `json:"role"`
+	InvitedByID      string    `json:"invited_by_id"`
+	InvitedByName    string    `json:"invited_by_name"`
+	InvitedByEmail   string    `json:"invited_by_email,omitempty"`
+	InviteURL        string    `json:"invite_url"`
+	ExpiresAt        time.Time `json:"expires_at"`
+}
+
+// EmailNotificationPayload is emitted for direct transactional email dispatch
+type EmailNotificationPayload struct {
+	To        []string       `json:"to"`
+	Subject   string         `json:"subject"`
+	Template  string         `json:"template,omitempty"`
+	Data      map[string]any `json:"data,omitempty"`
+	PlainBody string         `json:"plain_body,omitempty"`
+	HTMLBody  string         `json:"html_body,omitempty"`
+}
+
+// WebhookNotificationPayload is emitted to dispatch a webhook notification
+type WebhookNotificationPayload struct {
+	URL     string            `json:"url"`
+	Event   string            `json:"event"`
+	Headers map[string]string `json:"headers,omitempty"`
+	Payload any               `json:"payload"`
+	Secret  string            `json:"secret,omitempty"`
+}
+

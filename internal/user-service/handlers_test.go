@@ -2,15 +2,18 @@ package userservice_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 
 	userservice "github.com/dev-nathaniel/Adroit-platform/internal/user-service"
+	"github.com/dev-nathaniel/Adroit-platform/pkg/events"
 	"github.com/dev-nathaniel/Adroit-platform/pkg/identity"
 	"github.com/dev-nathaniel/Adroit-platform/pkg/response"
 	"github.com/dev-nathaniel/Adroit-platform/pkg/types"
@@ -301,4 +304,77 @@ func TestInvitationLifecycleFlow(t *testing.T) {
 		t.Fatalf("expected 404 on revoked token preview, got %d", recDavePreview.Code)
 	}
 }
+
+func TestInvitationEventEmission(t *testing.T) {
+	jwtSecret := "super-secure-testing-secret-key-32b"
+	repo := userservice.NewMemoryRepository()
+	bus := events.NewInMemBus()
+	defer bus.Close()
+
+	svc := userservice.NewService(repo, userservice.WithPublisher(bus))
+	handler := userservice.NewHandler(svc)
+
+	user1 := &types.User{
+		ID:        "usr-alice-111",
+		Email:     "alice@adroit.run",
+		Name:      "Alice Engineer",
+		CreatedAt: time.Now().UTC(),
+		UpdatedAt: time.Now().UTC(),
+	}
+	repo.SeedUser(user1)
+
+	r := chi.NewRouter()
+	handler.RegisterRoutes(r, jwtSecret)
+
+	aliceToken, _ := identity.GenerateJWT(user1.ID, user1.Email, jwtSecret, 1*time.Hour)
+
+	// Create org
+	createOrgBody, _ := json.Marshal(userservice.CreateOrgRequest{Name: "Event Corp"})
+	reqCreate := httptest.NewRequest(http.MethodPost, "/organizations", bytes.NewReader(createOrgBody))
+	reqCreate.Header.Set("Authorization", "Bearer "+aliceToken)
+	recCreate := httptest.NewRecorder()
+	r.ServeHTTP(recCreate, reqCreate)
+
+	var orgRes response.APIResponse[types.Organization]
+	_ = json.Unmarshal(recCreate.Body.Bytes(), &orgRes)
+	orgID := orgRes.Data.ID
+
+	// Listen for event
+	var wg sync.WaitGroup
+	wg.Add(1)
+	var capturedEmail string
+	var capturedOrg string
+	_ = bus.Subscribe(events.SubjectOrgMemberInvited, func(ctx context.Context, subject string, rawData []byte) error {
+		defer wg.Done()
+		var p events.OrgMemberInvitedPayload
+		_ = json.Unmarshal(rawData, &p)
+		capturedEmail = p.Email
+		capturedOrg = p.OrganizationName
+		return nil
+	})
+
+	// Invite user
+	inviteBody, _ := json.Marshal(userservice.CreateInvitationRequest{
+		Email: "newhire@eventcorp.io",
+		Role:  "member",
+	})
+	reqInvite := httptest.NewRequest(http.MethodPost, "/organizations/"+orgID+"/invitations", bytes.NewReader(inviteBody))
+	reqInvite.Header.Set("Authorization", "Bearer "+aliceToken)
+	recInvite := httptest.NewRecorder()
+	r.ServeHTTP(recInvite, reqInvite)
+
+	if recInvite.Code != http.StatusCreated {
+		t.Fatalf("expected 201 on invite, got %d", recInvite.Code)
+	}
+
+	wg.Wait()
+
+	if capturedEmail != "newhire@eventcorp.io" {
+		t.Errorf("expected captured email newhire@eventcorp.io, got %s", capturedEmail)
+	}
+	if capturedOrg != "Event Corp" {
+		t.Errorf("expected captured org Event Corp, got %s", capturedOrg)
+	}
+}
+
 

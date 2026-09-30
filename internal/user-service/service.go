@@ -14,6 +14,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/dev-nathaniel/Adroit-platform/pkg/events"
 	"github.com/dev-nathaniel/Adroit-platform/pkg/types"
 )
 
@@ -24,14 +25,34 @@ var (
 	ErrInvalidEmail     = errors.New("invalid email address")
 )
 
-// Service defines user and organization business logic
-type Service struct {
-	repo Repository
+// Option defines a functional option for Service configuration
+type Option func(*Service)
+
+// WithPublisher attaches an event publisher for domain event emission
+func WithPublisher(pub events.Publisher) Option {
+	return func(s *Service) {
+		if pub != nil {
+			s.publisher = pub
+		}
+	}
 }
 
-// NewService creates a new user service instance
-func NewService(repo Repository) *Service {
-	return &Service{repo: repo}
+// Service defines user and organization business logic
+type Service struct {
+	repo      Repository
+	publisher events.Publisher
+}
+
+// NewService creates a new user service instance with optional functional configurations
+func NewService(repo Repository, opts ...Option) *Service {
+	s := &Service{
+		repo:      repo,
+		publisher: events.NewNoopPublisher(),
+	}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
 }
 
 // GetProfile retrieves user profile
@@ -198,10 +219,40 @@ func (s *Service) CreateInvitation(ctx context.Context, callerID, orgID string, 
 		return nil, fmt.Errorf("failed to save invitation: %w", err)
 	}
 
+	inviteURL := "/invite?token=" + rawToken
+
+	// Fetch org and inviter details for notification payload
+	orgName := ""
+	if org, err := s.repo.GetOrganization(ctx, orgID); err == nil && org != nil {
+		orgName = org.Name
+	}
+	inviterName, inviterEmail := "", ""
+	if inviter, err := s.repo.GetUser(ctx, callerID); err == nil && inviter != nil {
+		inviterName = inviter.Name
+		inviterEmail = inviter.Email
+	}
+
+	// Asynchronously emit domain event to NATS JetStream for Notification Service
+	if s.publisher != nil {
+		eventPayload := events.OrgMemberInvitedPayload{
+			InvitationID:     invitation.ID,
+			OrganizationID:   orgID,
+			OrganizationName: orgName,
+			Email:            email,
+			Role:             string(role),
+			InvitedByID:      callerID,
+			InvitedByName:    inviterName,
+			InvitedByEmail:   inviterEmail,
+			InviteURL:        inviteURL,
+			ExpiresAt:        invitation.ExpiresAt,
+		}
+		_ = s.publisher.Publish(ctx, events.SubjectOrgMemberInvited, eventPayload)
+	}
+
 	return &InvitationResponse{
 		OrganizationInvitation: *invitation,
 		Token:                  rawToken,
-		InviteURL:              "/invite?token=" + rawToken,
+		InviteURL:              inviteURL,
 	}, nil
 }
 
