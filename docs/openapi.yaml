@@ -54,10 +54,14 @@ servers:
     description: Orchestration & Runtime Service (Direct Microservice Port)
   - url: http://localhost:8088
     description: Ingress & DNS Service (Direct Microservice Port)
+  - url: http://localhost:8089
+    description: Application Log Streaming Service (Direct Microservice Port)
 
 tags:
   - name: System & Gateway
     description: Gateway health, information, and status probes
+  - name: Log Streaming
+    description: Real-time container log aggregation and WebSocket/SSE streaming
   - name: Ingress & Custom Domains
     description: Edge reverse proxy dynamic routing, custom domain registration, DNS challenge validation (CNAME/TXT), and SSL/TLS lifecycle
   - name: Deployments & Orchestration
@@ -2712,6 +2716,319 @@ paths:
               schema:
                 $ref: '#/components/schemas/IngressRouteListResponseEnvelope'
 
+  /api/v1/services/{id}/logs:
+    get:
+      summary: Query historical application logs
+      description: Retrieve paginated container runtime stdout/stderr log entries for a service with keyword search, stream filtering, and timestamp bounds.
+      tags:
+        - Log Streaming
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Service UUID
+          schema:
+            type: string
+            format: uuid
+        - name: stream
+          in: query
+          description: Stream filter (`stdout`, `stderr`, `system`, or `all`)
+          schema:
+            type: string
+            enum: [stdout, stderr, system, all]
+        - name: search
+          in: query
+          description: Case-insensitive search string to match inside log messages
+          schema:
+            type: string
+        - name: limit
+          in: query
+          description: Maximum number of lines to return (default 100, max 1000)
+          schema:
+            type: integer
+            default: 100
+        - name: offset
+          in: query
+          description: Pagination offset
+          schema:
+            type: integer
+            default: 0
+        - name: since
+          in: query
+          description: Filter logs after this RFC3339 timestamp
+          schema:
+            type: string
+            format: date-time
+        - name: until
+          in: query
+          description: Filter logs before this RFC3339 timestamp
+          schema:
+            type: string
+            format: date-time
+      responses:
+        '200':
+          description: Historical logs matching the query
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppLogsResponseEnvelope'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+    post:
+      summary: Ingest batch log records for a service
+      description: Push batch application or container stdout/stderr log records (used by Nomad log agents or container sidecars).
+      tags:
+        - Log Streaming
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Service UUID
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IngestLogsRequest'
+      responses:
+        '202':
+          description: Log entries accepted for ingestion and broadcasting
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LogsIngestedResponseEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+    delete:
+      summary: Purge historical logs
+      description: Purge logs older than the specified timestamp for a service.
+      tags:
+        - Log Streaming
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Service UUID
+          schema:
+            type: string
+            format: uuid
+        - name: before
+          in: query
+          required: true
+          description: RFC3339 timestamp cutoff before which all logs will be permanently deleted
+          schema:
+            type: string
+            format: date-time
+      responses:
+        '200':
+          description: Logs successfully purged
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LogsPurgedResponseEnvelope'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /api/v1/services/{id}/logs/stream:
+    get:
+      summary: Stream live logs via Server-Sent Events (SSE)
+      description: Real-time unidirectional event stream (`text/event-stream`). Pre-sends recent backlog lines if `tail > 0` before transitioning smoothly into live updates. Sends periodic keep-alives every 15s.
+      tags:
+        - Log Streaming
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Service UUID
+          schema:
+            type: string
+            format: uuid
+        - name: token
+          in: query
+          description: JWT authentication token (for browser EventSource clients that cannot set Authorization headers)
+          schema:
+            type: string
+        - name: stream
+          in: query
+          description: Stream filter (`stdout`, `stderr`, `all`)
+          schema:
+            type: string
+            enum: [stdout, stderr, all]
+        - name: search
+          in: query
+          description: Live search filter string
+          schema:
+            type: string
+        - name: tail
+          in: query
+          description: Number of recent historical lines to pre-populate (default 50)
+          schema:
+            type: integer
+            default: 50
+      responses:
+        '200':
+          description: Active Server-Sent Events stream
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                example: "data: {\"id\":\"log_abc\",\"service_id\":\"svc_123\",\"stream\":\"stdout\",\"message\":\"Server listening on :8080\",\"timestamp\":\"2026-10-01T00:00:00Z\"}\n\n"
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /api/v1/services/{id}/logs/ws:
+    get:
+      summary: Stream live logs via WebSocket
+      description: Upgrades HTTP connection to a persistent duplex WebSocket channel for live log streaming. Supports client pings and dynamic filters.
+      tags:
+        - Log Streaming
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Service UUID
+          schema:
+            type: string
+            format: uuid
+        - name: token
+          in: query
+          description: JWT authentication token
+          schema:
+            type: string
+        - name: tail
+          in: query
+          description: Number of recent historical lines to pre-populate (default 50)
+          schema:
+            type: integer
+            default: 50
+      responses:
+        '101':
+          description: Switching Protocols to WebSocket stream
+
+  /api/v1/deployments/{id}/logs:
+    get:
+      summary: Query historical logs for a deployment
+      description: Retrieve log entries generated by a specific deployment rollout on Nomad.
+      tags:
+        - Log Streaming
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Deployment UUID
+          schema:
+            type: string
+            format: uuid
+        - name: stream
+          in: query
+          description: Stream filter (`stdout`, `stderr`, `all`)
+          schema:
+            type: string
+            enum: [stdout, stderr, all]
+        - name: search
+          in: query
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 100
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        '200':
+          description: Deployment logs matching query
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppLogsResponseEnvelope'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /api/v1/deployments/{id}/logs/stream:
+    get:
+      summary: Stream live logs for a deployment via SSE
+      description: Real-time Server-Sent Events stream scoped to a specific deployment instance.
+      tags:
+        - Log Streaming
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Deployment UUID
+          schema:
+            type: string
+            format: uuid
+        - name: token
+          in: query
+          schema:
+            type: string
+        - name: tail
+          in: query
+          schema:
+            type: integer
+            default: 50
+      responses:
+        '200':
+          description: Active Server-Sent Events stream for deployment
+          content:
+            text/event-stream:
+              schema:
+                type: string
+
+  /api/v1/logs/ingest:
+    post:
+      summary: Global batch log ingestion endpoint
+      description: Submit batch logs specifying the target `service_id` within the request body.
+      tags:
+        - Log Streaming
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IngestLogsRequest'
+      responses:
+        '202':
+          description: Accepted batch logs
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LogsIngestedResponseEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+
 # ==========================================
 # COMPONENTS & SCHEMAS
 # ==========================================
@@ -4913,5 +5230,143 @@ components:
         - success
         - data
 
+    # --- Log Streaming Schemas ---
+    AppLogEntry:
+      type: object
+      properties:
+        id:
+          type: string
+          example: "log_7f8a9b1c2d3e"
+        service_id:
+          type: string
+          format: uuid
+        deployment_id:
+          type: string
+          format: uuid
+          nullable: true
+        allocation_id:
+          type: string
+          nullable: true
+        stream:
+          type: string
+          enum: [stdout, stderr, system]
+          example: "stdout"
+        message:
+          type: string
+          example: "HTTP server listening on 0.0.0.0:8080"
+        timestamp:
+          type: string
+          format: date-time
+      required:
+        - id
+        - service_id
+        - stream
+        - message
+        - timestamp
 
+    AppLogsResponse:
+      type: object
+      properties:
+        service_id:
+          type: string
+          format: uuid
+        total_lines:
+          type: integer
+          example: 154
+        logs:
+          type: array
+          items:
+            $ref: '#/components/schemas/AppLogEntry'
+      required:
+        - service_id
+        - total_lines
+        - logs
 
+    AppLogsResponseEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          $ref: '#/components/schemas/AppLogsResponse'
+      required:
+        - success
+        - data
+
+    IngestLogItem:
+      type: object
+      required:
+        - message
+      properties:
+        message:
+          type: string
+          example: "Handled GET /items in 1.4ms"
+        stream:
+          type: string
+          enum: [stdout, stderr, system]
+          default: "stdout"
+        timestamp:
+          type: string
+          format: date-time
+        deployment_id:
+          type: string
+          format: uuid
+        allocation_id:
+          type: string
+
+    IngestLogsRequest:
+      type: object
+      required:
+        - logs
+      properties:
+        service_id:
+          type: string
+          format: uuid
+        deployment_id:
+          type: string
+          format: uuid
+        allocation_id:
+          type: string
+        logs:
+          type: array
+          items:
+            $ref: '#/components/schemas/IngestLogItem'
+
+    LogsIngestedResponseEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: object
+          properties:
+            accepted:
+              type: boolean
+              example: true
+            count:
+              type: integer
+              example: 10
+      required:
+        - success
+        - data
+
+    LogsPurgedResponseEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: object
+          properties:
+            service_id:
+              type: string
+              format: uuid
+            deleted_count:
+              type: integer
+              example: 450
+      required:
+        - success
+        - data

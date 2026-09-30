@@ -26,6 +26,7 @@ func NewReverseProxy(cfg ReverseProxyConfig) (http.Handler, error) {
 	}
 
 	proxy := &httputil.ReverseProxy{
+		FlushInterval: -1, // Flush writes immediately for SSE and real-time streaming
 		Rewrite: func(pr *httputil.ProxyRequest) {
 			pr.SetURL(cfg.TargetURL)
 			pr.SetXForwarded()

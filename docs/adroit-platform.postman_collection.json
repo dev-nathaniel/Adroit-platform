@@ -2504,6 +2504,264 @@
 					"response": []
 				}
 			]
+		},
+		{
+			"name": "9. Log Streaming",
+			"item": [
+				{
+					"name": "Query Service Logs",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/services/{{serviceId}}/logs?limit=50&stream=all",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"services",
+								"{{serviceId}}",
+								"logs"
+							],
+							"query": [
+								{
+									"key": "limit",
+									"value": "50"
+								},
+								{
+									"key": "stream",
+									"value": "all"
+								}
+							]
+						},
+						"description": "Retrieves paginated historical stdout/stderr/system logs for a service."
+					},
+					"response": []
+				},
+				{
+					"name": "Search Service Logs",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/services/{{serviceId}}/logs?search=error&limit=50",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"services",
+								"{{serviceId}}",
+								"logs"
+							],
+							"query": [
+								{
+									"key": "search",
+									"value": "error"
+								},
+								{
+									"key": "limit",
+									"value": "50"
+								}
+							]
+						},
+						"description": "Searches service logs using case-insensitive substring matching."
+					},
+					"response": []
+				},
+				{
+					"name": "Query Deployment Logs",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/deployments/{{deploymentId}}/logs?limit=50",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"deployments",
+								"{{deploymentId}}",
+								"logs"
+							],
+							"query": [
+								{
+									"key": "limit",
+									"value": "50"
+								}
+							]
+						},
+						"description": "Retrieves logs filtered by a specific deployment rollout ID."
+					},
+					"response": []
+				},
+				{
+					"name": "Stream Service Logs (SSE)",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "text/event-stream"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/services/{{serviceId}}/logs/stream?tail=50&stream=all",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"services",
+								"{{serviceId}}",
+								"logs",
+								"stream"
+							],
+							"query": [
+								{
+									"key": "tail",
+									"value": "50"
+								},
+								{
+									"key": "stream",
+									"value": "all"
+								}
+							]
+						},
+						"description": "Subscribes to live Server-Sent Events (SSE) stream for real-time application output. Supports ?token={{token}} parameter for browser EventSource."
+					},
+					"response": []
+				},
+				{
+					"name": "Stream Deployment Logs (SSE)",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "text/event-stream"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/deployments/{{deploymentId}}/logs/stream?tail=50",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"deployments",
+								"{{deploymentId}}",
+								"logs",
+								"stream"
+							],
+							"query": [
+								{
+									"key": "tail",
+									"value": "50"
+								}
+							]
+						},
+						"description": "Subscribes to live Server-Sent Events (SSE) stream filtered to a deployment instance."
+					},
+					"response": []
+				},
+				{
+					"name": "Ingest Service Logs (Batch)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"deployment_id\": \"{{deploymentId}}\",\n  \"logs\": [\n    {\n      \"stream\": \"stdout\",\n      \"message\": \"Application booted on port 8080\"\n    },\n    {\n      \"stream\": \"stdout\",\n      \"message\": \"Connected to database connection pool\"\n    },\n    {\n      \"stream\": \"stderr\",\n      \"message\": \"[warn] High latency detected on /api/v1/data: 120ms\"\n    }\n  ]\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/services/{{serviceId}}/logs",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"services",
+								"{{serviceId}}",
+								"logs"
+							]
+						},
+						"description": "Ingest batch application log entries for a service (used by container agents or sidecars)."
+					},
+					"response": []
+				},
+				{
+					"name": "Ingest Logs (Global Batch)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"service_id\": \"{{serviceId}}\",\n  \"deployment_id\": \"{{deploymentId}}\",\n  \"logs\": [\n    {\n      \"stream\": \"stdout\",\n      \"message\": \"Health check passing: 200 OK (0.8ms)\"\n    }\n  ]\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/logs/ingest",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"logs",
+								"ingest"
+							]
+						},
+						"description": "Submit batch logs specifying the target service_id in the body."
+					},
+					"response": []
+				},
+				{
+					"name": "Purge Service Logs",
+					"request": {
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/services/{{serviceId}}/logs?before=2026-10-01T00:00:00Z",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"services",
+								"{{serviceId}}",
+								"logs"
+							],
+							"query": [
+								{
+									"key": "before",
+									"value": "2026-10-01T00:00:00Z"
+								}
+							]
+						},
+						"description": "Permanently purges logs older than the specified RFC3339 timestamp."
+					},
+					"response": []
+				}
+			]
 		}
 	]
 }

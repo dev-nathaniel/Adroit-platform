@@ -60,3 +60,12 @@ All routes are dispatched through the API Gateway at `http://localhost:8080`:
   - `DELETE /api/v1/users/organizations/:orgID/invitations/:inviteID` (Revoke invitation)
   - `GET /api/v1/users/invitations/:token` (Public preview invitation)
   - `POST /api/v1/users/invitations/:token/accept` (Accept invitation & join workspace)
+* **Log Streaming:**
+  - `GET /api/v1/services/:id/logs` (Historical logs query & search)
+  - `GET /api/v1/services/:id/logs/stream` (Live Server-Sent Events stream)
+  - `GET /api/v1/services/:id/logs/ws` (Live WebSocket stream)
+  - `GET /api/v1/deployments/:id/logs` (Deployment logs)
+  - `GET /api/v1/deployments/:id/logs/stream` (Deployment SSE stream)
+  - `POST /api/v1/services/:id/logs` (Batch log ingestion)
+  - `POST /api/v1/logs/ingest` (Global batch log ingestion)
+  - `DELETE /api/v1/services/:id/logs` (Purge historical logs)

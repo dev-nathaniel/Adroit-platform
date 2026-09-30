@@ -29,6 +29,7 @@ type DownstreamConfig struct {
 	BuildServiceURL        string
 	OrchestrationServiceURL string
 	DNSServiceURL          string
+	LogServiceURL          string
 }
 
 // SetupRouter creates and configures the Chi router, middleware chain, and service proxies
@@ -144,6 +145,17 @@ func SetupRouter(log *slog.Logger, rl *middleware.RateLimiter, downstreams Downs
 		}
 	}
 
+	if downstreams.LogServiceURL != "" {
+		if logProxy, err := apigateway.CreateServiceProxy("log-service", downstreams.LogServiceURL, log); err == nil {
+			r.Mount("/api/v1/logs", logProxy)
+			r.HandleFunc("/api/v1/services/{id}/logs", logProxy.ServeHTTP)
+			r.HandleFunc("/api/v1/services/{id}/logs/*", logProxy.ServeHTTP)
+			r.HandleFunc("/api/v1/deployments/{id}/logs", logProxy.ServeHTTP)
+			r.HandleFunc("/api/v1/deployments/{id}/logs/*", logProxy.ServeHTTP)
+			log.Info("Mounted proxy for log-service", slog.String("target", downstreams.LogServiceURL))
+		}
+	}
+
 	// 7. Custom 404 & 405 Handlers
 	r.NotFound(func(w http.ResponseWriter, r *http.Request) {
 		response.NotFound(w, fmt.Sprintf("Route %s %s not found", r.Method, r.URL.Path))
@@ -171,6 +183,7 @@ func main() {
 		BuildServiceURL:        config.GetEnv("BUILD_SERVICE_URL", "http://localhost:8086"),
 		OrchestrationServiceURL: config.GetEnv("ORCHESTRATION_SERVICE_URL", "http://localhost:8087"),
 		DNSServiceURL:          config.GetEnv("DNS_SERVICE_URL", "http://localhost:8088"),
+		LogServiceURL:          config.GetEnv("LOG_SERVICE_URL", "http://localhost:8089"),
 	}
 
 	// 2. Initialize structured logger
@@ -192,6 +205,7 @@ func main() {
 		slog.String("build_service_url", downstreams.BuildServiceURL),
 		slog.String("orchestration_service_url", downstreams.OrchestrationServiceURL),
 		slog.String("dns_service_url", downstreams.DNSServiceURL),
+		slog.String("log_service_url", downstreams.LogServiceURL),
 	)
 
 	// 3. Initialize Rate Limiter

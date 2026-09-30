@@ -413,3 +413,34 @@ type GitCommitInfo struct {
 	Timestamp time.Time `json:"timestamp"`
 }
 
+// AppLogEntry represents a log line emitted by an application container or runtime instance
+type AppLogEntry struct {
+	ID           string    `json:"id"`
+	ServiceID    string    `json:"service_id"`
+	DeploymentID *string   `json:"deployment_id,omitempty"`
+	AllocationID *string   `json:"allocation_id,omitempty"`
+	Stream       string    `json:"stream"` // "stdout", "stderr", "system"
+	Message      string    `json:"message"`
+	Timestamp    time.Time `json:"timestamp"`
+}
+
+// AppLogsQueryFilter options for querying stored application logs
+type AppLogsQueryFilter struct {
+	ServiceID    string
+	DeploymentID string
+	AllocationID string
+	Stream       string
+	Search       string
+	Since        *time.Time
+	Until        *time.Time
+	Limit        int
+	Offset       int
+}
+
+// AppLogsResponse represents a paginated list of application log entries
+type AppLogsResponse struct {
+	Logs       []AppLogEntry `json:"logs"`
+	TotalLines int           `json:"total_lines"`
+	ServiceID  string        `json:"service_id"`
+}
+

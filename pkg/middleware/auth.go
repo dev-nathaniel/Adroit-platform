@@ -20,19 +20,25 @@ const (
 func RequireAuth(jwtSecret string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			tokenStr := ""
 			authHeader := r.Header.Get("Authorization")
-			if authHeader == "" {
-				response.Unauthorized(w, "Missing Authorization header")
+			if authHeader != "" {
+				parts := strings.SplitN(authHeader, " ", 2)
+				if len(parts) == 2 && strings.EqualFold(parts[0], "Bearer") {
+					tokenStr = parts[1]
+				} else {
+					response.Unauthorized(w, "Invalid Authorization header format. Expected 'Bearer <token>'")
+					return
+				}
+			} else if qToken := r.URL.Query().Get("token"); qToken != "" {
+				tokenStr = qToken
+			}
+
+			if tokenStr == "" {
+				response.Unauthorized(w, "Missing authentication token in Authorization header or query parameter")
 				return
 			}
 
-			parts := strings.SplitN(authHeader, " ", 2)
-			if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
-				response.Unauthorized(w, "Invalid Authorization header format. Expected 'Bearer <token>'")
-				return
-			}
-
-			tokenStr := parts[1]
 			claims, err := identity.ValidateJWT(tokenStr, jwtSecret)
 			if err != nil {
 				if err == identity.ErrExpiredToken {

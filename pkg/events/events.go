@@ -61,6 +61,9 @@ const (
 	SubjectDomainVerified = "adroit.domain.verified"
 	SubjectDomainDeleted  = "adroit.domain.deleted"
 	SubjectRouteUpdated   = "adroit.route.updated"
+
+	// Log and Observability events
+	SubjectLogIngested = "adroit.log.ingested"
 )
 
 // Event is the universal CloudEvents-like envelope sent across NATS JetStream
@@ -330,6 +333,16 @@ type RouteUpdatedPayload struct {
 	HostPattern string   `json:"host_pattern"`
 	UpstreamURL string   `json:"upstream_url"`
 	Domains     []string `json:"domains"`
+}
+
+// LogIngestedPayload is emitted when new log entries are ingested into the platform
+type LogIngestedPayload struct {
+	ServiceID    string    `json:"service_id"`
+	DeploymentID string    `json:"deployment_id,omitempty"`
+	AllocationID string    `json:"allocation_id,omitempty"`
+	Stream       string    `json:"stream"`
+	Message      string    `json:"message"`
+	Timestamp    time.Time `json:"timestamp"`
 }
 
 
