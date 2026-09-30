@@ -51,8 +51,30 @@ func main() {
 
 	repo := authservice.NewPostgresRepository(db)
 
-	// 3. Service & Handlers
-	svc := authservice.NewService(repo, jwtSecret, jwtExpiration)
+	// 3. Service & Handlers (with GitHub OAuth configuration)
+	githubClientID := config.GetEnv("GITHUB_CLIENT_ID", "")
+	githubClientSecret := config.GetEnv("GITHUB_CLIENT_SECRET", "")
+	githubRedirectURI := config.GetEnv("GITHUB_REDIRECT_URI", "http://localhost:8080/api/v1/auth/github/callback")
+	githubFrontendURL := config.GetEnv("GITHUB_FRONTEND_URL", "http://localhost:3000/auth/callback")
+
+	var svcOpts []authservice.Option
+	if githubFrontendURL != "" {
+		svcOpts = append(svcOpts, authservice.WithFrontendURL(githubFrontendURL))
+	}
+	if githubClientID != "" && githubClientSecret != "" {
+		ghClient := authservice.NewDefaultGitHubClient(authservice.GitHubConfig{
+			ClientID:     githubClientID,
+			ClientSecret: githubClientSecret,
+			RedirectURI:  githubRedirectURI,
+			FrontendURL:  githubFrontendURL,
+		})
+		svcOpts = append(svcOpts, authservice.WithGitHubClient(ghClient))
+		log.Info("GitHub OAuth configured", slog.String("redirect_uri", githubRedirectURI))
+	} else {
+		log.Warn("GitHub OAuth credentials not provided (set GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET)")
+	}
+
+	svc := authservice.NewService(repo, jwtSecret, jwtExpiration, svcOpts...)
 	handler := authservice.NewHandler(svc)
 
 	// 4. Chi Router

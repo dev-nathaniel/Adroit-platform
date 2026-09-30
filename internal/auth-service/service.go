@@ -16,25 +16,50 @@ import (
 )
 
 var (
-	ErrInvalidEmail    = errors.New("invalid email address")
-	ErrPasswordTooWeak = errors.New("password must be at least 8 characters long")
-	ErrInvalidCredentials = errors.New("invalid email or password")
+	ErrInvalidEmail        = errors.New("invalid email address")
+	ErrPasswordTooWeak     = errors.New("password must be at least 8 characters long")
+	ErrInvalidCredentials  = errors.New("invalid email or password")
+	ErrGitHubNotConfigured = errors.New("github oauth is not configured")
+	ErrInvalidOAuthCode    = errors.New("invalid oauth code")
 )
+
+// Option allows configuring optional Service components
+type Option func(*Service)
+
+// WithGitHubClient configures the GitHub OAuth client
+func WithGitHubClient(client GitHubClient) Option {
+	return func(s *Service) {
+		s.githubClient = client
+	}
+}
+
+// WithFrontendURL configures the redirect destination after OAuth callback
+func WithFrontendURL(url string) Option {
+	return func(s *Service) {
+		s.frontendURL = url
+	}
+}
 
 // Service defines auth business logic operations
 type Service struct {
 	repo          Repository
 	jwtSecret     string
 	jwtExpiration time.Duration
+	githubClient  GitHubClient
+	frontendURL   string
 }
 
-// NewService creates a new auth service instance
-func NewService(repo Repository, jwtSecret string, jwtExpiration time.Duration) *Service {
-	return &Service{
+// NewService creates a new auth service instance with optional configurations
+func NewService(repo Repository, jwtSecret string, jwtExpiration time.Duration, opts ...Option) *Service {
+	s := &Service{
 		repo:          repo,
 		jwtSecret:     jwtSecret,
 		jwtExpiration: jwtExpiration,
 	}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
 }
 
 // Register creates a new user, hashes password, provisions a default workspace, and returns JWT
@@ -121,7 +146,7 @@ func (s *Service) Login(ctx context.Context, req LoginRequest) (*AuthResponse, e
 		return nil, ErrInvalidCredentials
 	}
 
-	if !identity.CheckPassword(req.Password, account.PasswordHash) {
+	if account.PasswordHash == "" || !identity.CheckPassword(req.Password, account.PasswordHash) {
 		return nil, ErrInvalidCredentials
 	}
 
@@ -133,13 +158,136 @@ func (s *Service) Login(ctx context.Context, req LoginRequest) (*AuthResponse, e
 	return &AuthResponse{
 		Token: token,
 		User: types.User{
-			ID:        account.ID,
-			Email:     account.Email,
-			Name:      account.Name,
-			AvatarURL: account.AvatarURL,
-			CreatedAt: account.CreatedAt,
-			UpdatedAt: account.UpdatedAt,
+			ID:             account.ID,
+			Email:          account.Email,
+			Name:           account.Name,
+			AvatarURL:      account.AvatarURL,
+			GitHubUsername: account.GitHubUsername,
+			CreatedAt:      account.CreatedAt,
+			UpdatedAt:      account.UpdatedAt,
 		},
+	}, nil
+}
+
+// GetGitHubAuthURL returns the OAuth authorization URL
+func (s *Service) GetGitHubAuthURL(state string) (*GitHubAuthURLResponse, error) {
+	if s.githubClient == nil {
+		return nil, ErrGitHubNotConfigured
+	}
+	authURL := s.githubClient.GetAuthURL(state)
+	return &GitHubAuthURLResponse{
+		URL:   authURL,
+		State: state,
+	}, nil
+}
+
+// GetFrontendURL returns the configured frontend redirect destination
+func (s *Service) GetFrontendURL() string {
+	return s.frontendURL
+}
+
+// AuthenticateWithGitHub exchanges a code from GitHub, retrieves user information,
+// links or creates the account, provisions a workspace if new, and issues a JWT.
+func (s *Service) AuthenticateWithGitHub(ctx context.Context, code string) (*AuthResponse, error) {
+	if s.githubClient == nil {
+		return nil, ErrGitHubNotConfigured
+	}
+	code = strings.TrimSpace(code)
+	if code == "" {
+		return nil, ErrInvalidOAuthCode
+	}
+
+	// 1. Exchange temporary code for access token
+	accessToken, err := s.githubClient.ExchangeCode(ctx, code)
+	if err != nil {
+		return nil, fmt.Errorf("failed to exchange github code: %w", err)
+	}
+
+	// 2. Fetch user profile and primary email
+	ghUser, err := s.githubClient.GetUser(ctx, accessToken)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch github profile: %w", err)
+	}
+
+	ghIDStr := fmt.Sprintf("%d", ghUser.ID)
+	email := strings.TrimSpace(strings.ToLower(ghUser.Email))
+	name := strings.TrimSpace(ghUser.Name)
+	if name == "" {
+		name = ghUser.Login
+	}
+
+	now := time.Now().UTC()
+	var account *UserAccount
+	var defaultOrg *types.Organization
+
+	// 3. Check if user already exists by GitHub ID
+	existingUserByGH, err := s.repo.GetUserByGitHubID(ctx, ghIDStr)
+	if err == nil && existingUserByGH != nil {
+		account = existingUserByGH
+		_ = s.repo.UpdateGitHubToken(ctx, account.ID, accessToken)
+	} else {
+		// 4. Check if user already exists by verified email (account linking)
+		existingUserByEmail, err := s.repo.GetUserByEmail(ctx, email)
+		if err == nil && existingUserByEmail != nil {
+			account = existingUserByEmail
+			_ = s.repo.LinkGitHubAccount(ctx, account.ID, ghIDStr, ghUser.Login, ghUser.AvatarURL, accessToken)
+			account.GitHubID = ghIDStr
+			account.GitHubUsername = ghUser.Login
+			account.GitHubAccessToken = accessToken
+			if account.AvatarURL == "" {
+				account.AvatarURL = ghUser.AvatarURL
+			}
+		} else {
+			// 5. Brand new user registration via GitHub
+			userID := uuid.New().String()
+			account = &UserAccount{
+				ID:                userID,
+				Email:             email,
+				Name:              name,
+				AvatarURL:         ghUser.AvatarURL,
+				GitHubID:          ghIDStr,
+				GitHubUsername:    ghUser.Login,
+				GitHubAccessToken: accessToken,
+				CreatedAt:         now,
+				UpdatedAt:         now,
+			}
+
+			if err := s.repo.CreateUser(ctx, account); err != nil {
+				return nil, fmt.Errorf("failed to create oauth user: %w", err)
+			}
+
+			// Automatically provision default workspace
+			slug := generateSlug(account.Name) + "-" + userID[:6]
+			defaultOrg = &types.Organization{
+				ID:        uuid.New().String(),
+				Name:      account.Name + "'s Workspace",
+				Slug:      slug,
+				OwnerID:   userID,
+				CreatedAt: now,
+				UpdatedAt: now,
+			}
+			_ = s.repo.CreateOrganization(ctx, defaultOrg)
+		}
+	}
+
+	// 6. Issue JWT Token
+	token, err := identity.GenerateJWT(account.ID, account.Email, s.jwtSecret, s.jwtExpiration)
+	if err != nil {
+		return nil, fmt.Errorf("failed to issue token: %w", err)
+	}
+
+	return &AuthResponse{
+		Token: token,
+		User: types.User{
+			ID:             account.ID,
+			Email:          account.Email,
+			Name:           account.Name,
+			AvatarURL:      account.AvatarURL,
+			GitHubUsername: account.GitHubUsername,
+			CreatedAt:      account.CreatedAt,
+			UpdatedAt:      account.UpdatedAt,
+		},
+		Organization: defaultOrg,
 	}, nil
 }
 
@@ -151,12 +299,13 @@ func (s *Service) GetMe(ctx context.Context, userID string) (*types.User, error)
 	}
 
 	return &types.User{
-		ID:        account.ID,
-		Email:     account.Email,
-		Name:      account.Name,
-		AvatarURL: account.AvatarURL,
-		CreatedAt: account.CreatedAt,
-		UpdatedAt: account.UpdatedAt,
+		ID:             account.ID,
+		Email:          account.Email,
+		Name:           account.Name,
+		AvatarURL:      account.AvatarURL,
+		GitHubUsername: account.GitHubUsername,
+		CreatedAt:      account.CreatedAt,
+		UpdatedAt:      account.UpdatedAt,
 	}, nil
 }
 

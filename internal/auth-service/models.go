@@ -26,13 +26,29 @@ type AuthResponse struct {
 	Organization *types.Organization `json:"organization,omitempty"`
 }
 
-// UserAccount internal representation with password hash
+// UserAccount internal representation with credentials and OAuth metadata
 type UserAccount struct {
-	ID           string
-	Email        string
-	Name         string
-	PasswordHash string
-	AvatarURL    string
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
+	ID                string
+	Email             string
+	Name              string
+	PasswordHash      string
+	AvatarURL         string
+	GitHubID          string
+	GitHubUsername    string
+	GitHubAccessToken string
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
 }
+
+// GitHubAuthRequest holds inputs for direct OAuth token exchange
+type GitHubAuthRequest struct {
+	Code  string `json:"code"`
+	State string `json:"state,omitempty"`
+}
+
+// GitHubAuthURLResponse provides the GitHub OAuth authorization URL
+type GitHubAuthURLResponse struct {
+	URL   string `json:"url"`
+	State string `json:"state"`
+}
+

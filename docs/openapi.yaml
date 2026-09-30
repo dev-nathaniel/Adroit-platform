@@ -202,6 +202,147 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponseEnvelope'
 
+  /api/v1/auth/github:
+    get:
+      tags:
+        - Authentication
+      summary: Initiate GitHub OAuth Login
+      description: |
+        Redirects the caller's browser directly to GitHub's OAuth authorization page.
+        Generates and attaches a CSRF protection state in an `oauth_state` HTTP-only cookie.
+      parameters:
+        - name: state
+          in: query
+          required: false
+          description: Optional caller-specified CSRF state string
+          schema:
+            type: string
+      responses:
+        '307':
+          description: Redirects browser to GitHub OAuth authorization URL
+        '501':
+          description: GitHub OAuth is not configured on this server
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+    post:
+      tags:
+        - Authentication
+      summary: Direct GitHub OAuth Token Exchange
+      description: |
+        Exchanges a temporary GitHub authorization code directly for an Adroit platform JWT session token.
+        Ideal for Single Page Applications (SPAs), mobile clients, and developer CLI tools.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GitHubAuthRequest'
+      responses:
+        '200':
+          description: Successfully authenticated via GitHub
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponseEnvelope'
+        '400':
+          description: Invalid authorization code or state mismatch
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '501':
+          description: GitHub OAuth is not configured on this server
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+
+  /api/v1/auth/github/url:
+    get:
+      tags:
+        - Authentication
+      summary: Get GitHub OAuth Authorization URL
+      description: Returns the GitHub OAuth authorization URL and state token as JSON without redirecting.
+      parameters:
+        - name: state
+          in: query
+          required: false
+          description: Optional caller-specified CSRF state string
+          schema:
+            type: string
+      responses:
+        '200':
+          description: GitHub authorization URL generated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GitHubAuthURLResponseEnvelope'
+        '501':
+          description: GitHub OAuth is not configured on this server
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+
+  /api/v1/auth/github/callback:
+    get:
+      tags:
+        - Authentication
+      summary: GitHub OAuth Callback Ingress
+      description: |
+        Callback endpoint redirected to by GitHub upon user authorization.
+        Exchanges code with GitHub, links or creates the user account, provisions a default workspace if new,
+        and either redirects to the configured frontend URL with `token` query param or returns JSON.
+      parameters:
+        - name: code
+          in: query
+          required: true
+          description: Temporary OAuth authorization code issued by GitHub
+          schema:
+            type: string
+        - name: state
+          in: query
+          required: false
+          description: CSRF verification state token
+          schema:
+            type: string
+        - name: error
+          in: query
+          required: false
+          description: Error code returned by GitHub if user rejected authorization
+          schema:
+            type: string
+        - name: error_description
+          in: query
+          required: false
+          description: Human-readable error description from GitHub
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Authentication successful (JSON response)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponseEnvelope'
+        '307':
+          description: Redirects browser to frontend dashboard with token
+        '400':
+          description: Invalid authorization code, OAuth error, or state mismatch
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '501':
+          description: GitHub OAuth is not configured on this server
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+
+
   # ==========================================
   # USER PROFILES
   # ==========================================
@@ -996,6 +1137,43 @@ components:
         - success
         - data
 
+    GitHubAuthRequest:
+      type: object
+      required:
+        - code
+      properties:
+        code:
+          type: string
+          example: "35c64b73b5df5b1e6005"
+        state:
+          type: string
+          example: "csrf-state-token-1234"
+
+    GitHubAuthURLResponse:
+      type: object
+      required:
+        - url
+        - state
+      properties:
+        url:
+          type: string
+          example: "https://github.com/login/oauth/authorize?client_id=12345&redirect_uri=...&scope=read:user+user:email&state=abc"
+        state:
+          type: string
+          example: "d290f1ee-6c54-4b01-90e6-d701748f0851"
+
+    GitHubAuthURLResponseEnvelope:
+      type: object
+      required:
+        - success
+        - data
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          $ref: '#/components/schemas/GitHubAuthURLResponse'
+
     User:
       type: object
       properties:
@@ -1013,6 +1191,9 @@ components:
         avatar_url:
           type: string
           example: "https://assets.adroit.run/avatars/jane.png"
+        github_username:
+          type: string
+          example: "janedoe"
         created_at:
           type: string
           format: date-time

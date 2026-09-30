@@ -240,6 +240,157 @@
 						"description": "Returns the authenticated user session profile from token claims."
 					},
 					"response": []
+				},
+				{
+					"name": "GitHub Auth URL",
+					"request": {
+						"auth": {
+							"type": "noauth"
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/auth/github/url",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"auth",
+								"github",
+								"url"
+							]
+						},
+						"description": "Retrieves the GitHub OAuth authorization URL and CSRF state token without redirecting."
+					},
+					"response": []
+				},
+				{
+					"name": "GitHub Login (Browser Redirect)",
+					"request": {
+						"auth": {
+							"type": "noauth"
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/auth/github",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"auth",
+								"github"
+							]
+						},
+						"description": "Redirects browser directly to GitHub OAuth login page and sets oauth_state cookie."
+					},
+					"response": []
+				},
+				{
+					"name": "GitHub Callback Ingress",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    var res = pm.response.json();",
+									"    if (res.data && res.data.token) {",
+									"        pm.collectionVariables.set('token', res.data.token);",
+									"        console.log('Saved GitHub JWT token to collection variable: token');",
+									"    }",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "noauth"
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/auth/github/callback?code=mock_code&state=mock_state",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"auth",
+								"github",
+								"callback"
+							],
+							"query": [
+								{
+									"key": "code",
+									"value": "mock_code"
+								},
+								{
+									"key": "state",
+									"value": "mock_state"
+								}
+							]
+						},
+						"description": "Receives GitHub OAuth callback with authorization code."
+					},
+					"response": []
+				},
+				{
+					"name": "GitHub Token Exchange (SPA/CLI)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    var res = pm.response.json();",
+									"    if (res.data && res.data.token) {",
+									"        pm.collectionVariables.set('token', res.data.token);",
+									"        console.log('Saved GitHub JWT token to collection variable: token');",
+									"    }",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "noauth"
+						},
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"code\": \"mock_github_auth_code\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/auth/github",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"auth",
+								"github"
+							]
+						},
+						"description": "Exchanges temporary GitHub code directly for JWT Bearer token."
+					},
+					"response": []
 				}
 			]
 		},
