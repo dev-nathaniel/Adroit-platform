@@ -43,6 +43,7 @@ func (h *Handler) RegisterRoutes(r chi.Router, jwtSecret string) {
 	r.Group(func(pr chi.Router) {
 		pr.Use(middleware.RequireAuth(jwtSecret))
 		pr.Get("/me", h.HandleGetMe)
+		pr.Post("/password", h.HandleSetPassword)
 	})
 }
 
@@ -243,6 +244,39 @@ func (h *Handler) HandleGetMe(w http.ResponseWriter, r *http.Request) {
 	}
 
 	response.JSON(w, http.StatusOK, user)
+}
+
+// HandleSetPassword handles setting or changing user password
+func (h *Handler) HandleSetPassword(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r.Context())
+	if userID == "" {
+		response.Unauthorized(w, "")
+		return
+	}
+
+	var req SetPasswordRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.BadRequest(w, "Invalid JSON body", nil)
+		return
+	}
+
+	if err := h.service.SetPassword(r.Context(), userID, req); err != nil {
+		switch err {
+		case ErrPasswordTooWeak:
+			response.BadRequest(w, err.Error(), nil)
+		case ErrInvalidCredentials:
+			response.Unauthorized(w, "Current password is incorrect")
+		case ErrUserNotFound:
+			response.NotFound(w, "User not found")
+		default:
+			response.InternalServerError(w, "Failed to update password")
+		}
+		return
+	}
+
+	response.JSON(w, http.StatusOK, map[string]string{
+		"message": "Password updated successfully",
+	})
 }
 
 func generateRandomState() string {

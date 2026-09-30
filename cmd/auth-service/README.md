@@ -143,6 +143,7 @@ go test -cover ./internal/auth-service
 | `GET` | `/api/v1/auth/github/callback` | GitHub OAuth callback ingress | No |
 | `POST` | `/api/v1/auth/github` | Direct authorization code exchange for JWT session | No |
 | `GET` | `/api/v1/auth/me` | Fetch authenticated user profile | Yes (`Bearer <token>`) |
+| `POST` | `/api/v1/auth/password` | Set or change account password | Yes (`Bearer <token>`) |
 
 ### Example cURL Commands
 

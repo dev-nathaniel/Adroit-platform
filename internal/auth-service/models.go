@@ -52,3 +52,10 @@ type GitHubAuthURLResponse struct {
 	State string `json:"state"`
 }
 
+// SetPasswordRequest holds inputs to set or change an account password
+type SetPasswordRequest struct {
+	CurrentPassword string `json:"current_password,omitempty"`
+	NewPassword     string `json:"new_password"`
+}
+
+

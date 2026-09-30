@@ -339,3 +339,81 @@ func TestGitHubAuth_Errors(t *testing.T) {
 		t.Errorf("expected 501 Not Implemented when GitHub unconfigured, got %d", recUnconf.Code)
 	}
 }
+
+func TestMultipleAuth_GitHubUserSetsPasswordAndCanLoginWithBoth(t *testing.T) {
+	mockGH := &authservice.MockGitHubClient{
+		GetUserFunc: func(ctx context.Context, accessToken string) (*authservice.GitHubUserInfo, error) {
+			return &authservice.GitHubUserInfo{
+				ID:        888999,
+				Login:     "multiauth-user",
+				Name:      "Multi Auth User",
+				Email:     "multiauth@example.com",
+				AvatarURL: "https://github.com/multiauth.png",
+			}, nil
+		},
+	}
+	r, _, _ := setupTestRouterWithGitHub("", mockGH)
+
+	// 1. Sign up via GitHub
+	reqGH := httptest.NewRequest(http.MethodGet, "/github/callback?code=multi-code", nil)
+	recGH := httptest.NewRecorder()
+	r.ServeHTTP(recGH, reqGH)
+
+	if recGH.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK on GitHub login, got %d", recGH.Code)
+	}
+
+	var authRes response.APIResponse[authservice.AuthResponse]
+	_ = json.Unmarshal(recGH.Body.Bytes(), &authRes)
+	jwtToken := authRes.Data.Token
+
+	// 2. Set password for the first time (no current_password required for OAuth users)
+	setPassBody, _ := json.Marshal(authservice.SetPasswordRequest{
+		NewPassword: "BrandNewPassword123!",
+	})
+	reqSetPass := httptest.NewRequest(http.MethodPost, "/password", bytes.NewReader(setPassBody))
+	reqSetPass.Header.Set("Authorization", "Bearer "+jwtToken)
+	recSetPass := httptest.NewRecorder()
+	r.ServeHTTP(recSetPass, reqSetPass)
+
+	if recSetPass.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK on setting password, got %d. Body: %s", recSetPass.Code, recSetPass.Body.String())
+	}
+
+	// 3. User can now authenticate using Email + Password!
+	loginBody, _ := json.Marshal(authservice.LoginRequest{
+		Email:    "multiauth@example.com",
+		Password: "BrandNewPassword123!",
+	})
+	reqLogin := httptest.NewRequest(http.MethodPost, "/login", bytes.NewReader(loginBody))
+	recLogin := httptest.NewRecorder()
+	r.ServeHTTP(recLogin, reqLogin)
+
+	if recLogin.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK on email+password login after setting password, got %d", recLogin.Code)
+	}
+
+	// 4. User can ALSO continue authenticating with GitHub!
+	reqGHAgain := httptest.NewRequest(http.MethodGet, "/github/callback?code=multi-code-2", nil)
+	recGHAgain := httptest.NewRecorder()
+	r.ServeHTTP(recGHAgain, reqGHAgain)
+
+	if recGHAgain.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK on GitHub login after setting password, got %d", recGHAgain.Code)
+	}
+
+	// 5. Changing password now enforces verifying current_password
+	wrongCurrentBody, _ := json.Marshal(authservice.SetPasswordRequest{
+		CurrentPassword: "WrongPassword!",
+		NewPassword:     "UpdatedPassword456!",
+	})
+	reqWrong := httptest.NewRequest(http.MethodPost, "/password", bytes.NewReader(wrongCurrentBody))
+	reqWrong.Header.Set("Authorization", "Bearer "+jwtToken)
+	recWrong := httptest.NewRecorder()
+	r.ServeHTTP(recWrong, reqWrong)
+
+	if recWrong.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401 Unauthorized for wrong current password, got %d", recWrong.Code)
+	}
+}
+

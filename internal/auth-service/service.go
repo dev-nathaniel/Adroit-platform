@@ -291,6 +291,33 @@ func (s *Service) AuthenticateWithGitHub(ctx context.Context, code string) (*Aut
 	}, nil
 }
 
+// SetPassword allows an authenticated user to set a password (if registered via OAuth)
+// or change their existing password (verifying current_password).
+func (s *Service) SetPassword(ctx context.Context, userID string, req SetPasswordRequest) error {
+	if len(req.NewPassword) < 8 {
+		return ErrPasswordTooWeak
+	}
+
+	account, err := s.repo.GetUserByID(ctx, userID)
+	if err != nil {
+		return err
+	}
+
+	// If account already has a password, verify current password first
+	if account.PasswordHash != "" {
+		if !identity.CheckPassword(req.CurrentPassword, account.PasswordHash) {
+			return ErrInvalidCredentials
+		}
+	}
+
+	newHash, err := identity.HashPassword(req.NewPassword)
+	if err != nil {
+		return fmt.Errorf("failed to hash password: %w", err)
+	}
+
+	return s.repo.UpdatePassword(ctx, userID, newHash)
+}
+
 // GetMe retrieves the profile of the authenticated user
 func (s *Service) GetMe(ctx context.Context, userID string) (*types.User, error) {
 	account, err := s.repo.GetUserByID(ctx, userID)

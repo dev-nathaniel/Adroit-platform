@@ -24,6 +24,7 @@ type Repository interface {
 	GetUserByGitHubID(ctx context.Context, githubID string) (*UserAccount, error)
 	LinkGitHubAccount(ctx context.Context, userID, githubID, githubUsername, avatarURL, accessToken string) error
 	UpdateGitHubToken(ctx context.Context, userID, accessToken string) error
+	UpdatePassword(ctx context.Context, userID, passwordHash string) error
 	CreateOrganization(ctx context.Context, org *types.Organization) error
 }
 
@@ -157,6 +158,20 @@ func (r *PostgresRepository) UpdateGitHubToken(ctx context.Context, userID, acce
 	return nil
 }
 
+func (r *PostgresRepository) UpdatePassword(ctx context.Context, userID, passwordHash string) error {
+	query := `
+		UPDATE users
+		SET password_hash = $2,
+		    updated_at = $3
+		WHERE id = $1
+	`
+	_, err := r.db.ExecContext(ctx, query, userID, passwordHash, time.Now().UTC())
+	if err != nil {
+		return fmt.Errorf("failed to update password: %w", err)
+	}
+	return nil
+}
+
 func (r *PostgresRepository) CreateOrganization(ctx context.Context, org *types.Organization) error {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -283,6 +298,19 @@ func (m *MemoryRepository) UpdateGitHubToken(ctx context.Context, userID, access
 		return ErrUserNotFound
 	}
 	acc.GitHubAccessToken = accessToken
+	acc.UpdatedAt = time.Now().UTC()
+	return nil
+}
+
+func (m *MemoryRepository) UpdatePassword(ctx context.Context, userID, passwordHash string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	acc, exists := m.usersByID[userID]
+	if !exists {
+		return ErrUserNotFound
+	}
+	acc.PasswordHash = passwordHash
 	acc.UpdatedAt = time.Now().UTC()
 	return nil
 }

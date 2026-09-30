@@ -242,6 +242,46 @@
 					"response": []
 				},
 				{
+					"name": "Set or Change Password",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"current_password\": \"\",\n    \"new_password\": \"BrandNewSecurePassword123!\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/auth/password",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"auth",
+								"password"
+							]
+						},
+						"description": "Sets a new password for OAuth users (enabling email+password login) or changes an existing password."
+					},
+					"response": []
+				},
+				{
 					"name": "GitHub Auth URL",
 					"request": {
 						"auth": {
