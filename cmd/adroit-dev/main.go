@@ -26,6 +26,7 @@ const (
 	colorYellow  = "\033[33m"
 	colorMagenta = "\033[35m"
 	colorRed     = "\033[31m"
+	colorBlue    = "\033[34m"
 	colorBold    = "\033[1m"
 )
 
@@ -60,6 +61,13 @@ func main() {
 			Bin:   "notification-service",
 			Port:  8083,
 			Color: colorMagenta,
+		},
+		{
+			Name:  "Project Service",
+			Pkg:   "./cmd/project-service",
+			Bin:   "project-service",
+			Port:  8084,
+			Color: colorBlue,
 		},
 		{
 			Name:  "API Gateway",

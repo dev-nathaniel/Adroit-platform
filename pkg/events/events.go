@@ -35,7 +35,11 @@ const (
 	SubjectDatabaseProvisioned        = "adroit.database.provisioned"
 	SubjectDatabaseDeprovisioned      = "adroit.database.deprovisioned"
 
-	// Service scaling events
+	// Service lifecycle events
+	SubjectServiceCreated        = "adroit.service.created"
+	SubjectServiceUpdated        = "adroit.service.updated"
+	SubjectServiceDeleted        = "adroit.service.deleted"
+	SubjectServiceMoved          = "adroit.service.moved"
 	SubjectServiceScaleRequested = "adroit.service.scale_requested"
 
 	// Organization & User events
@@ -155,4 +159,63 @@ type WebhookNotificationPayload struct {
 	Payload any               `json:"payload"`
 	Secret  string            `json:"secret,omitempty"`
 }
+
+// ProjectCreatedPayload is emitted when a new project is created
+type ProjectCreatedPayload struct {
+	ProjectID      string `json:"project_id"`
+	OrganizationID string `json:"organization_id"`
+	Name           string `json:"name"`
+	Slug           string `json:"slug"`
+}
+
+// ProjectUpdatedPayload is emitted when a project is updated
+type ProjectUpdatedPayload struct {
+	ProjectID      string `json:"project_id"`
+	OrganizationID string `json:"organization_id"`
+	Name           string `json:"name"`
+	Slug           string `json:"slug"`
+}
+
+// ProjectDeletedPayload is emitted when a project is deleted
+type ProjectDeletedPayload struct {
+	ProjectID      string `json:"project_id"`
+	OrganizationID string `json:"organization_id"`
+}
+
+// ServiceCreatedPayload is emitted when a service is registered
+type ServiceCreatedPayload struct {
+	ServiceID      string  `json:"service_id"`
+	OrganizationID string  `json:"organization_id"`
+	ProjectID      *string `json:"project_id,omitempty"`
+	Name           string  `json:"name"`
+	Slug           string  `json:"slug"`
+	Type           string  `json:"type"`
+	RepoURL        string  `json:"repo_url"`
+	Branch         string  `json:"branch"`
+}
+
+// ServiceUpdatedPayload is emitted when service config changes
+type ServiceUpdatedPayload struct {
+	ServiceID      string  `json:"service_id"`
+	OrganizationID string  `json:"organization_id"`
+	ProjectID      *string `json:"project_id,omitempty"`
+	Name           string  `json:"name"`
+	Slug           string  `json:"slug"`
+}
+
+// ServiceDeletedPayload is emitted when a service is removed
+type ServiceDeletedPayload struct {
+	ServiceID      string  `json:"service_id"`
+	OrganizationID string  `json:"organization_id"`
+	ProjectID      *string `json:"project_id,omitempty"`
+}
+
+// ServiceMovedPayload is emitted when a service is assigned, moved to, or removed from a project
+type ServiceMovedPayload struct {
+	ServiceID      string  `json:"service_id"`
+	OrganizationID string  `json:"organization_id"`
+	OldProjectID   *string `json:"old_project_id,omitempty"`
+	NewProjectID   *string `json:"new_project_id,omitempty"`
+}
+
 
