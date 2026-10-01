@@ -40,6 +40,7 @@ type Repository interface {
 
 	CreateDeployment(ctx context.Context, d *types.Deployment) error
 	GetServiceEnvVars(ctx context.Context, serviceID string) (map[string]string, error)
+	GetBuildEnvironmentVariables(ctx context.Context, serviceID string, projectID *string) (map[string]string, error)
 }
 
 // PostgresRepository implements Repository using PostgreSQL
@@ -511,3 +512,48 @@ func (r *PostgresRepository) GetServiceEnvVars(ctx context.Context, serviceID st
 	}
 	return envVars, nil
 }
+
+// GetBuildEnvironmentVariables loads project + service env vars filtered for build-time (scope IN ('build', 'all'))
+func (r *PostgresRepository) GetBuildEnvironmentVariables(ctx context.Context, serviceID string, projectID *string) (map[string]string, error) {
+	envVars := make(map[string]string)
+
+	// 1. Load project-level build vars
+	if projectID != nil && *projectID != "" {
+		pQuery := `
+			SELECT key, value
+			FROM environment_variables
+			WHERE project_id = $1 AND scope IN ('build', 'all')
+		`
+		pRows, err := r.db.QueryContext(ctx, pQuery, *projectID)
+		if err == nil {
+			defer pRows.Close()
+			for pRows.Next() {
+				var k, v string
+				if err := pRows.Scan(&k, &v); err == nil {
+					envVars[k] = v
+				}
+			}
+		}
+	}
+
+	// 2. Load service-level build vars (overrides project)
+	sQuery := `
+		SELECT key, value
+		FROM environment_variables
+		WHERE service_id = $1 AND scope IN ('build', 'all')
+	`
+	sRows, err := r.db.QueryContext(ctx, sQuery, serviceID)
+	if err != nil {
+		return envVars, nil
+	}
+	defer sRows.Close()
+	for sRows.Next() {
+		var k, v string
+		if err := sRows.Scan(&k, &v); err == nil {
+			envVars[k] = v
+		}
+	}
+
+	return envVars, nil
+}
+

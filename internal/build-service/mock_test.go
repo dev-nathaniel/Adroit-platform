@@ -219,3 +219,8 @@ func (m *MockRepository) GetServiceEnvVars(ctx context.Context, serviceID string
 	}
 	return res, nil
 }
+
+func (m *MockRepository) GetBuildEnvironmentVariables(ctx context.Context, serviceID string, projectID *string) (map[string]string, error) {
+	return m.GetServiceEnvVars(ctx, serviceID)
+}
+

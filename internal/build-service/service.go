@@ -424,7 +424,15 @@ func (s *Service) ExecuteBuild(parentCtx context.Context, buildID string, buildA
 	}
 
 	orgSlug, _ := s.repo.GetOrganizationSlug(buildCtx, svc.OrganizationID)
-	envVars, _ := s.repo.GetServiceEnvVars(buildCtx, svc.ID)
+	configuredBuildEnv, _ := s.repo.GetBuildEnvironmentVariables(buildCtx, svc.ID, svc.ProjectID)
+
+	mergedBuildArgs := make(map[string]string)
+	for k, v := range configuredBuildEnv {
+		mergedBuildArgs[k] = v
+	}
+	for k, v := range buildArgs {
+		mergedBuildArgs[k] = v // Explicit request arguments override service env vars
+	}
 
 	dockerfile := dockerfileOverride
 	if dockerfile == "" {
@@ -484,7 +492,7 @@ func (s *Service) ExecuteBuild(parentCtx context.Context, buildID string, buildA
 		DockerfilePath: dockerfile,
 		BuildCommand:   svc.BuildCommand,
 		RootDirectory:  svc.RootDirectory,
-		BuildArgs:      buildArgs,
+		BuildArgs:      mergedBuildArgs,
 		RegistryHost:   s.cfg.RegistryHost,
 	}
 
@@ -584,7 +592,7 @@ func (s *Service) ExecuteBuild(parentCtx context.Context, buildID string, buildA
 				Replicas:     svc.MinReplicas,
 				Resources:    svc.Resources,
 				HealthCheck:  svc.HealthCheck,
-				EnvVars:      envVars,
+				EnvVars:      nil, // Resolved securely by orchestration service with Vault
 				RuntimeTier:  svc.RuntimeTier,
 			})
 
