@@ -65,6 +65,16 @@
 			"key": "domainId",
 			"value": "",
 			"type": "string"
+		},
+		{
+			"key": "apiKey",
+			"value": "sk_live_adroit_gateway_token",
+			"type": "string"
+		},
+		{
+			"key": "adroitTier",
+			"value": "pro",
+			"type": "string"
 		}
 	],
 	"item": [
@@ -73,6 +83,23 @@
 			"item": [
 				{
 					"name": "Health Check",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"pm.test(\"Rate limit headers present\", function () {",
+									"    pm.expect(pm.response.headers.has(\"X-RateLimit-Limit\")).to.be.true;",
+									"    pm.expect(pm.response.headers.has(\"X-RateLimit-Remaining\")).to.be.true;",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
 					"request": {
 						"auth": {
 							"type": "noauth"
@@ -88,7 +115,7 @@
 								"healthz"
 							]
 						},
-						"description": "Returns health status of the API Gateway and current timestamp."
+						"description": "Returns health status of the API Gateway, current timestamp, and distributed rate limit status headers."
 					},
 					"response": []
 				},
@@ -133,6 +160,180 @@
 							]
 						},
 						"description": "Checks operational status of the API v1 routing subsystem."
+					},
+					"response": []
+				},
+				{
+					"name": "Rate Limit - Free Tier Probe",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"pm.test(\"Rate limit headers present for Free tier\", function () {",
+									"    pm.expect(pm.response.headers.has(\"X-RateLimit-Limit\")).to.be.true;",
+									"    pm.expect(pm.response.headers.has(\"X-RateLimit-Remaining\")).to.be.true;",
+									"    if (pm.response.headers.has(\"X-RateLimit-Tier\")) {",
+									"        pm.expect(pm.response.headers.get(\"X-RateLimit-Tier\")).to.eql(\"free\");",
+									"    }",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "noauth"
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/healthz",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"healthz"
+							]
+						},
+						"description": "Validates default Free Tier distributed rate limiting behavior and response headers."
+					},
+					"response": []
+				},
+				{
+					"name": "Rate Limit - Pro Tier Probe",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"pm.test(\"Pro tier quota recognized\", function () {",
+									"    if (pm.response.headers.has(\"X-RateLimit-Tier\")) {",
+									"        pm.expect(pm.response.headers.get(\"X-RateLimit-Tier\")).to.eql(\"pro\");",
+									"        pm.expect(pm.response.headers.get(\"X-RateLimit-Limit\")).to.eql(\"250\");",
+									"    }",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "noauth"
+						},
+						"method": "GET",
+						"header": [
+							{
+								"key": "X-Adroit-Tier",
+								"value": "pro"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/healthz",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"healthz"
+							]
+						},
+						"description": "Tests Pro Tier quota elevation (5,000 req/min, burst 250) via tier header."
+					},
+					"response": []
+				},
+				{
+					"name": "Rate Limit - Enterprise Tier Probe",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"pm.test(\"Enterprise tier quota recognized\", function () {",
+									"    if (pm.response.headers.has(\"X-RateLimit-Tier\")) {",
+									"        pm.expect(pm.response.headers.get(\"X-RateLimit-Tier\")).to.eql(\"enterprise\");",
+									"        pm.expect(pm.response.headers.get(\"X-RateLimit-Limit\")).to.eql(\"2000\");",
+									"    }",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "noauth"
+						},
+						"method": "GET",
+						"header": [
+							{
+								"key": "X-Adroit-Tier",
+								"value": "enterprise"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/healthz",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"healthz"
+							]
+						},
+						"description": "Tests Enterprise Tier quota elevation (50,000 req/min, burst 2,000) via tier header."
+					},
+					"response": []
+				},
+				{
+					"name": "Rate Limit - API Key Probe",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"pm.test(\"API Key rate limit bucket active\", function () {",
+									"    pm.expect(pm.response.headers.has(\"X-RateLimit-Limit\")).to.be.true;",
+									"    pm.expect(pm.response.headers.has(\"X-RateLimit-Remaining\")).to.be.true;",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "noauth"
+						},
+						"method": "GET",
+						"header": [
+							{
+								"key": "X-API-Key",
+								"value": "{{apiKey}}"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/healthz",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"healthz"
+							]
+						},
+						"description": "Tests per-API-key rate limiting bucket isolation."
 					},
 					"response": []
 				}

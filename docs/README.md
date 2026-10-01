@@ -49,7 +49,11 @@ Copy and paste the contents of `docs/openapi.yaml` into [editor.swagger.io](http
 
 All routes are dispatched through the API Gateway at `http://localhost:8080`:
 
-* **System & Gateway:** `GET /healthz`, `GET /`, `GET /api/v1/status`
+* **System & Gateway:**
+  - `GET /healthz` (Health check & rate limit inspection headers)
+  - `GET /` (Platform runtime metadata & routing status)
+  - `GET /api/v1/status` (API v1 subsystem operational check)
+  - **Rate Limit Probes:** `GET /healthz` with `X-Adroit-Tier: [free|pro|enterprise|internal]` or `X-API-Key: <key>`
 * **Authentication:** `POST /api/v1/auth/register`, `POST /api/v1/auth/login`, `GET /api/v1/auth/me`, `GET /api/v1/auth/github/login`, `GET /api/v1/auth/github/callback`
 * **Profiles:** `GET /api/v1/users/profile`, `PATCH /api/v1/users/profile`
 * **Organizations:** `GET /api/v1/users/organizations`, `POST /api/v1/users/organizations`, `GET /api/v1/users/organizations/:orgID`
@@ -220,3 +224,28 @@ Adroit enforces zero-plaintext secrets storage, defense-in-depth isolation, and 
 7. **Local Development & CI Resiliency**:
    - Both `project-service` and `orchestration-service` feature a thread-safe `SimulatedSecretStore` driver fallback.
    - If HashiCorp Vault is not running or network probes fail during development, the services smoothly fall back to the in-memory simulated driver, ensuring developers and automated CI test suites can execute without mandatory Vault clusters.
+
+---
+
+## 6. Distributed Rate Limiting & Customer Tiers
+
+The API Gateway enforces distributed rate limiting across all incoming requests:
+
+1. **Redis Cluster Backend with In-Memory Fallback:**
+   - Synchronized across API Gateway nodes using Redis Lua scripts.
+   - Keys use Redis Cluster `{...}` hash tags to guarantee single-slot shard routing.
+   - If Redis becomes unreachable, the gateway automatically falls back to an in-memory token bucket, preventing service interruption.
+
+2. **Customer Subscription Tier Quotas:**
+   - **`Free`**: 100 req/min (burst 30)
+   - **`Pro`**: 5,000 req/min (burst 250)
+   - **`Enterprise`**: 50,000 req/min (burst 2,000)
+   - **`Internal`**: 100,000 req/min (burst 5,000)
+
+3. **Standard Response Headers:**
+   - `X-RateLimit-Limit`: Maximum requests permitted per window.
+   - `X-RateLimit-Remaining`: Remaining request quota.
+   - `X-RateLimit-Reset`: Seconds until quota refills.
+   - `X-RateLimit-Tier`: Resolved subscriber tier (`free`, `pro`, `enterprise`, `internal`).
+   - `Retry-After`: Returned with HTTP `429 Too Many Requests` indicating wait seconds.
+

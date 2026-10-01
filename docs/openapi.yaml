@@ -10,6 +10,21 @@ info:
     - **Auth Service**: `/api/v1/auth/*` (Port `8081`)
     - **User & Organization Service**: `/api/v1/users/*` (Port `8082`)
 
+    ### Distributed Rate Limiting & Customer Tiers
+    All incoming requests through the **API Gateway** are protected by a distributed rate limiting engine backed by **Redis Cluster** with automatic local in-memory fallback:
+    - **Algorithms**: Token Bucket (burst capacity + continuous refill) and Sliding Window Counter.
+    - **Customer Subscription Tiers**:
+      - `Free`: 100 requests / minute (burst 30)
+      - `Pro`: 5,000 requests / minute (burst 250)
+      - `Enterprise`: 50,000 requests / minute (burst 2,000)
+      - `Internal`: 100,000 requests / minute (burst 5,000)
+    - **Standard Rate Limit Response Headers**:
+      - `X-RateLimit-Limit`: Maximum requests permitted per window.
+      - `X-RateLimit-Remaining`: Remaining request allowance in current window.
+      - `X-RateLimit-Reset`: Seconds until the rate limit bucket refills.
+      - `X-RateLimit-Tier`: Resolved subscriber tier (`free`, `pro`, `enterprise`, `internal`).
+      - `Retry-After`: Seconds to wait when HTTP `429 Too Many Requests` is returned.
+
     ### Standard Response Format
     All responses use a standardized JSON envelope:
     ```json
@@ -98,13 +113,27 @@ paths:
         - System & Gateway
       summary: Health Check
       description: Returns health status of the API Gateway and current server UTC timestamp.
+      parameters:
+        - $ref: '#/components/parameters/AdroitTierHeader'
+        - $ref: '#/components/parameters/APIKeyHeader'
       responses:
         '200':
           description: Service is healthy
+          headers:
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/X-RateLimit-Limit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/X-RateLimit-Remaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/X-RateLimit-Reset'
+            X-RateLimit-Tier:
+              $ref: '#/components/headers/X-RateLimit-Tier'
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HealthResponseEnvelope'
+        '429':
+          $ref: '#/components/responses/TooManyRequestsError'
 
   /:
     get:
@@ -112,13 +141,27 @@ paths:
         - System & Gateway
       summary: Gateway Information
       description: Returns gateway runtime metadata, routing engine status, and version.
+      parameters:
+        - $ref: '#/components/parameters/AdroitTierHeader'
+        - $ref: '#/components/parameters/APIKeyHeader'
       responses:
         '200':
           description: Gateway operational metadata
+          headers:
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/X-RateLimit-Limit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/X-RateLimit-Remaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/X-RateLimit-Reset'
+            X-RateLimit-Tier:
+              $ref: '#/components/headers/X-RateLimit-Tier'
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/GatewayInfoResponseEnvelope'
+        '429':
+          $ref: '#/components/responses/TooManyRequestsError'
 
   /api/v1/status:
     get:
@@ -126,13 +169,27 @@ paths:
         - System & Gateway
       summary: API v1 Subsystem Status
       description: Verifies that the API v1 subsystem is active and operational.
+      parameters:
+        - $ref: '#/components/parameters/AdroitTierHeader'
+        - $ref: '#/components/parameters/APIKeyHeader'
       responses:
         '200':
           description: API v1 subsystem active status
+          headers:
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/X-RateLimit-Limit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/X-RateLimit-Remaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/X-RateLimit-Reset'
+            X-RateLimit-Tier:
+              $ref: '#/components/headers/X-RateLimit-Tier'
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/StatusResponseEnvelope'
+        '429':
+          $ref: '#/components/responses/TooManyRequestsError'
 
   # ==========================================
   # AUTHENTICATION
@@ -3113,6 +3170,58 @@ components:
       scheme: bearer
       bearerFormat: JWT
       description: Standard HMAC-SHA256 JWT issued by `/api/v1/auth/login` or `/api/v1/auth/register`.
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: Platform API Key used for service-to-service access and rate limit tier tracking.
+
+  headers:
+    X-RateLimit-Limit:
+      description: The maximum number of requests allowed in the current rate limit period.
+      schema:
+        type: integer
+        example: 250
+    X-RateLimit-Remaining:
+      description: The number of remaining requests allowed in the current rate limit period.
+      schema:
+        type: integer
+        example: 249
+    X-RateLimit-Reset:
+      description: Number of seconds until the rate limit bucket completely refills.
+      schema:
+        type: integer
+        example: 60
+    X-RateLimit-Tier:
+      description: The customer subscription tier assigned to this request.
+      schema:
+        type: string
+        enum: [free, pro, enterprise, internal]
+        example: "pro"
+    Retry-After:
+      description: Number of seconds to wait before retrying when quota is exhausted.
+      schema:
+        type: integer
+        example: 5
+
+  parameters:
+    AdroitTierHeader:
+      name: X-Adroit-Tier
+      in: header
+      description: Explicit tier override header (for internal testing or authenticated proxies).
+      required: false
+      schema:
+        type: string
+        enum: [free, pro, enterprise, internal]
+        example: "pro"
+    APIKeyHeader:
+      name: X-API-Key
+      in: header
+      description: Customer API Key for tier identification and quota tracking.
+      required: false
+      schema:
+        type: string
+        example: "sk_live_9f8e7d6c5b4a"
 
   responses:
     BadRequestError:
@@ -3150,6 +3259,24 @@ components:
           schema:
             $ref: '#/components/schemas/ErrorResponseEnvelope'
 
+    TooManyRequestsError:
+      description: Too Many Requests - The client has exceeded their allotted rate limit quota
+      headers:
+        Retry-After:
+          $ref: '#/components/headers/Retry-After'
+        X-RateLimit-Limit:
+          $ref: '#/components/headers/X-RateLimit-Limit'
+        X-RateLimit-Remaining:
+          $ref: '#/components/headers/X-RateLimit-Remaining'
+        X-RateLimit-Reset:
+          $ref: '#/components/headers/X-RateLimit-Reset'
+        X-RateLimit-Tier:
+          $ref: '#/components/headers/X-RateLimit-Tier'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/RateLimitErrorResponseEnvelope'
+
   schemas:
     # --- Universal Response Envelopes ---
     ErrorResponseEnvelope:
@@ -3179,6 +3306,48 @@ components:
       required:
         - code
         - message
+
+    RateLimitErrorResponseEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: false
+        error:
+          $ref: '#/components/schemas/RateLimitAPIError'
+      required:
+        - success
+        - error
+
+    RateLimitAPIError:
+      type: object
+      properties:
+        code:
+          type: string
+          example: "RATE_LIMITED"
+        message:
+          type: string
+          example: "Rate limit exceeded. Please wait before making more requests."
+        details:
+          type: object
+          properties:
+            retry_after_seconds:
+              type: integer
+              example: 5
+            limit:
+              type: integer
+              example: 250
+            tier:
+              type: string
+              example: "pro"
+      required:
+        - code
+        - message
+
+    RateLimitTier:
+      type: string
+      enum: [free, pro, enterprise, internal]
+      example: "pro"
 
     Pagination:
       type: object
