@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 	"github.com/dev-nathaniel/Adroit-platform/pkg/config"
 	"github.com/dev-nathaniel/Adroit-platform/pkg/logger"
 	"github.com/dev-nathaniel/Adroit-platform/pkg/middleware"
+	"github.com/dev-nathaniel/Adroit-platform/pkg/ratelimit"
 	"github.com/dev-nathaniel/Adroit-platform/pkg/response"
 )
 
@@ -32,8 +34,9 @@ type DownstreamConfig struct {
 	LogServiceURL          string
 }
 
-// SetupRouter creates and configures the Chi router, middleware chain, and service proxies
-func SetupRouter(log *slog.Logger, rl *middleware.RateLimiter, downstreams DownstreamConfig) *chi.Mux {
+// SetupRouter creates and configures the Chi router, middleware chain, and service proxies.
+// rl can be *middleware.RateLimiter, *ratelimit.TierLimiter, or ratelimit.Limiter.
+func SetupRouter(log *slog.Logger, rl any, downstreams DownstreamConfig) *chi.Mux {
 	r := chi.NewRouter()
 
 	// 1. Global Middlewares
@@ -44,7 +47,14 @@ func SetupRouter(log *slog.Logger, rl *middleware.RateLimiter, downstreams Downs
 
 	// 2. Rate Limiting Middleware
 	if rl != nil {
-		r.Use(middleware.RateLimit(rl))
+		switch v := rl.(type) {
+		case *middleware.RateLimiter:
+			r.Use(middleware.RateLimit(v))
+		case *ratelimit.TierLimiter:
+			r.Use(middleware.TierRateLimit(v))
+		case ratelimit.Limiter:
+			r.Use(middleware.DistributedRateLimit(v))
+		}
 	}
 
 	// 3. Platform Diagnostics
@@ -173,6 +183,12 @@ func main() {
 	baseCfg := config.LoadBaseConfig(8080)
 	rateLimitRPS := float64(config.GetEnvInt("RATE_LIMIT_RPS", 50))
 	rateLimitBurst := config.GetEnvInt("RATE_LIMIT_BURST", 100)
+	redisAddrs := strings.Split(config.GetEnv("REDIS_ADDRS", config.GetEnv("REDIS_ADDR", "localhost:6379")), ",")
+	redisPassword := config.GetEnv("REDIS_PASSWORD", "")
+	redisDB := config.GetEnvInt("REDIS_DB", 0)
+	rateLimitBackend := ratelimit.BackendType(config.GetEnv("RATE_LIMIT_BACKEND", "redis"))
+	rateLimitAlgorithm := ratelimit.Algorithm(config.GetEnv("RATE_LIMIT_ALGORITHM", "token_bucket"))
+	enableTiers := config.GetEnvBool("RATE_LIMIT_TIERS_ENABLED", true)
 
 	downstreams := DownstreamConfig{
 		AuthServiceURL:         config.GetEnv("AUTH_SERVICE_URL", "http://localhost:8081"),
@@ -197,6 +213,10 @@ func main() {
 		slog.Int("port", baseCfg.Port),
 		slog.Float64("rate_limit_rps", rateLimitRPS),
 		slog.Int("rate_limit_burst", rateLimitBurst),
+		slog.String("rate_limit_backend", string(rateLimitBackend)),
+		slog.String("rate_limit_algorithm", string(rateLimitAlgorithm)),
+		slog.Bool("rate_limit_tiers_enabled", enableTiers),
+		slog.String("redis_addrs", strings.Join(redisAddrs, ",")),
 		slog.String("auth_service_url", downstreams.AuthServiceURL),
 		slog.String("user_service_url", downstreams.UserServiceURL),
 		slog.String("notification_service_url", downstreams.NotificationServiceURL),
@@ -208,12 +228,44 @@ func main() {
 		slog.String("log_service_url", downstreams.LogServiceURL),
 	)
 
-	// 3. Initialize Rate Limiter
-	rl := middleware.NewRateLimiter(rateLimitRPS, rateLimitBurst)
-	defer rl.Stop()
+	// 3. Initialize Distributed / Tier Rate Limiter
+	rlCfg := ratelimit.Config{
+		Backend:          rateLimitBackend,
+		Algorithm:        rateLimitAlgorithm,
+		Rate:             rateLimitRPS,
+		Burst:            int64(rateLimitBurst),
+		Window:           1 * time.Minute,
+		RedisAddrs:       redisAddrs,
+		RedisPassword:    redisPassword,
+		RedisDB:          redisDB,
+		FallbackToMemory: true,
+		Logger:           log,
+	}
 
-	// 4. Initialize Router
-	router := SetupRouter(log, rl, downstreams)
+	var router *chi.Mux
+	if enableTiers {
+		tierLimiter, err := ratelimit.NewTierLimiter(rlCfg, nil)
+		if err != nil {
+			log.Error("Failed to initialize tier rate limiter, falling back to in-memory limiter", slog.String("error", err.Error()))
+			fallbackRL := middleware.NewRateLimiter(rateLimitRPS, rateLimitBurst)
+			defer fallbackRL.Stop()
+			router = SetupRouter(log, fallbackRL, downstreams)
+		} else {
+			defer tierLimiter.Close()
+			router = SetupRouter(log, tierLimiter, downstreams)
+		}
+	} else {
+		distLimiter, err := ratelimit.New(rlCfg)
+		if err != nil {
+			log.Error("Failed to initialize distributed rate limiter, falling back to in-memory limiter", slog.String("error", err.Error()))
+			fallbackRL := middleware.NewRateLimiter(rateLimitRPS, rateLimitBurst)
+			defer fallbackRL.Stop()
+			router = SetupRouter(log, fallbackRL, downstreams)
+		} else {
+			defer distLimiter.Close()
+			router = SetupRouter(log, distLimiter, downstreams)
+		}
+	}
 
 	// 5. Configure HTTP server
 	addr := fmt.Sprintf(":%d", baseCfg.Port)

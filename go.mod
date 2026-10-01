@@ -3,6 +3,7 @@ module github.com/dev-nathaniel/Adroit-platform
 go 1.27.1
 
 require (
+	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/go-chi/chi/v5 v5.3.2 // indirect
 	github.com/golang-jwt/jwt/v5 v5.3.1 // indirect
 	github.com/golang-migrate/migrate/v4 v4.20.1 // indirect
@@ -17,6 +18,8 @@ require (
 	github.com/nats-io/nats.go v1.54.0 // indirect
 	github.com/nats-io/nkeys v0.4.16 // indirect
 	github.com/nats-io/nuid v1.0.1 // indirect
+	github.com/redis/go-redis/v9 v9.22.0 // indirect
+	go.uber.org/atomic v1.11.0 // indirect
 	golang.org/x/crypto v0.57.0 // indirect
 	golang.org/x/sync v0.23.0 // indirect
 	golang.org/x/sys v0.48.0 // indirect

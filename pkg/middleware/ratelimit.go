@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/dev-nathaniel/Adroit-platform/pkg/ratelimit"
 	"github.com/dev-nathaniel/Adroit-platform/pkg/response"
 )
 
@@ -127,13 +128,21 @@ func extractClientIP(r *http.Request) string {
 	}
 	return r.RemoteAddr
 }
+// ExtractClientIP retrieves the real client IP considering proxy headers
+func ExtractClientIP(r *http.Request) string {
+	return extractClientIP(r)
+}
 
-// RateLimit returns an HTTP middleware using the provided RateLimiter
+// RateLimit returns an HTTP middleware using the provided in-memory RateLimiter (backward compatible)
 func RateLimit(rl *RateLimiter) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			ip := extractClientIP(r)
+			if rl == nil {
+				next.ServeHTTP(w, r)
+				return
+			}
 
+			ip := extractClientIP(r)
 			allowed, remaining, retryAfter := rl.Allow(ip)
 
 			w.Header().Set("X-RateLimit-Limit", fmt.Sprintf("%d", rl.burst))
@@ -163,3 +172,114 @@ func RateLimit(rl *RateLimiter) func(http.Handler) http.Handler {
 		})
 	}
 }
+
+// DistributedRateLimit returns an HTTP middleware using the provided distributed Limiter
+func DistributedRateLimit(lim ratelimit.Limiter, keyExtractor ...func(r *http.Request) string) func(http.Handler) http.Handler {
+	extractor := func(r *http.Request) string {
+		return extractClientIP(r)
+	}
+	if len(keyExtractor) > 0 && keyExtractor[0] != nil {
+		extractor = keyExtractor[0]
+	}
+
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if lim == nil {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			key := extractor(r)
+			res, err := lim.Allow(r.Context(), key)
+			if err != nil {
+				// On system failure, fail-open to preserve API availability
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			w.Header().Set("X-RateLimit-Limit", fmt.Sprintf("%d", res.Limit))
+			w.Header().Set("X-RateLimit-Remaining", fmt.Sprintf("%d", res.Remaining))
+			if res.ResetAfter > 0 {
+				w.Header().Set("X-RateLimit-Reset", fmt.Sprintf("%d", int(res.ResetAfter.Seconds())))
+			}
+
+			if !res.Allowed {
+				retryAfterSecs := int(res.RetryAfter.Seconds())
+				if retryAfterSecs < 1 {
+					retryAfterSecs = 1
+				}
+				w.Header().Set("Retry-After", fmt.Sprintf("%d", retryAfterSecs))
+
+				response.Error(
+					w,
+					http.StatusTooManyRequests,
+					response.ErrCodeRateLimited,
+					"Rate limit exceeded. Please wait before making more requests.",
+					map[string]any{
+						"retry_after_seconds": retryAfterSecs,
+						"limit":               res.Limit,
+					},
+				)
+				return
+			}
+
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// TierRateLimit returns an HTTP middleware enforcing customer tier rate quotas
+func TierRateLimit(tl *ratelimit.TierLimiter, resolver ...func(r *http.Request) (string, ratelimit.Tier)) func(http.Handler) http.Handler {
+	resFunc := ratelimit.DefaultTierResolver
+	if len(resolver) > 0 && resolver[0] != nil {
+		resFunc = resolver[0]
+	}
+
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if tl == nil {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			key, tier := resFunc(r)
+			res, err := tl.Allow(r.Context(), tier, key)
+			if err != nil {
+				// On system failure, fail-open to preserve API availability
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			w.Header().Set("X-RateLimit-Limit", fmt.Sprintf("%d", res.Limit))
+			w.Header().Set("X-RateLimit-Remaining", fmt.Sprintf("%d", res.Remaining))
+			w.Header().Set("X-RateLimit-Tier", string(tier))
+			if res.ResetAfter > 0 {
+				w.Header().Set("X-RateLimit-Reset", fmt.Sprintf("%d", int(res.ResetAfter.Seconds())))
+			}
+
+			if !res.Allowed {
+				retryAfterSecs := int(res.RetryAfter.Seconds())
+				if retryAfterSecs < 1 {
+					retryAfterSecs = 1
+				}
+				w.Header().Set("Retry-After", fmt.Sprintf("%d", retryAfterSecs))
+
+				response.Error(
+					w,
+					http.StatusTooManyRequests,
+					response.ErrCodeRateLimited,
+					"Rate limit exceeded. Please wait before making more requests.",
+					map[string]any{
+						"retry_after_seconds": retryAfterSecs,
+						"limit":               res.Limit,
+						"tier":                tier,
+					},
+				)
+				return
+			}
+
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+

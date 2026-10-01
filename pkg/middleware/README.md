@@ -24,8 +24,15 @@ The `middleware` package provides production-grade HTTP middlewares compatible w
 
 ### `middleware.RateLimit(rl *RateLimiter)`
 * **Signature:** `func(*RateLimiter) func(http.Handler) http.Handler`
-* **Function:** Token bucket rate limiter per client IP. Inspects `X-Forwarded-For` and `X-Real-IP` behind reverse proxies (e.g. Caddy/Load Balancer). Injects `X-RateLimit-Limit`, `X-RateLimit-Remaining`, and when quota is exhausted, injects `Retry-After` and returns a `429 Too Many Requests` JSON error. Includes background janitor to purge stale inactive client records.
-* **[TODO] Redis Cluster Backend:** Currently in-memory for zero latency in single-instance/dev setups. Will be extended with a Redis cluster backend for distributed synchronization across multi-node gateway clusters.
+* **Function:** In-memory token bucket rate limiter per client IP. Inspects `X-Forwarded-For` and `X-Real-IP` behind reverse proxies (e.g. Caddy/Load Balancer). Injects `X-RateLimit-Limit`, `X-RateLimit-Remaining`, and when quota is exhausted, injects `Retry-After` and returns a `429 Too Many Requests` JSON error. Includes background janitor to purge stale inactive client records.
+
+### `middleware.DistributedRateLimit(lim ratelimit.Limiter, keyExtractor ...func(r *http.Request) string)`
+* **Signature:** `func(ratelimit.Limiter, ...func(*http.Request) string) func(http.Handler) http.Handler`
+* **Function:** Distributed rate limiter backed by Redis Cluster or Memory (`pkg/ratelimit`). Evaluates atomic Lua scripts in Redis with Cluster `{...}` hash tags and automatic in-memory fallback. Sets `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset`, and `Retry-After`.
+
+### `middleware.TierRateLimit(tl *ratelimit.TierLimiter, resolver ...func(r *http.Request) (string, ratelimit.Tier))`
+* **Signature:** `func(*ratelimit.TierLimiter, ...func(*http.Request) (string, ratelimit.Tier)) func(http.Handler) http.Handler`
+* **Function:** Multi-tier distributed customer rate limiter enforcing Free, Pro, Enterprise, and Internal quotas with automatic key and credential resolution (`X-API-Key`, JWT claims, `X-Adroit-Tier`, or client IP). Sets `X-RateLimit-Tier`, `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset`, and `Retry-After`.
 
 ---
 

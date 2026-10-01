@@ -14,10 +14,11 @@ The **API Gateway** is the central entrypoint for the Adroit Platform. It handle
 * **CORS:** Cross-Origin Resource Sharing for dashboard and mobile interfaces.
 * **Graceful Shutdown:** Intercepts `SIGINT`/`SIGTERM` and drains active connections before termination.
 
-### Rate Limiting Design & Roadmap
-* **Current Implementation:** In-memory Token Bucket (`pkg/middleware/ratelimit.go`). Provides zero-latency, zero-dependency per-IP throttling for single-instance / local development.
-* **Why not `chi.Throttle`:** Chi's built-in throttle only caps global concurrent in-flight requests server-wide; it does not track requests per second, time windows, or client IPs.
-* **[TODO] Redis Cluster Distributed Limiting:** When scaling the API Gateway to multiple nodes behind the Edge Load Balancer, the rate limiter will transition to the Redis Cluster to synchronize rate buckets across all nodes and support tier-based quotas (e.g. Free vs Pro tier).
+### Rate Limiting Design & Distributed Redis Sync
+* **Distributed Synchronization:** Powered by `pkg/ratelimit` and `pkg/middleware`, connecting to Redis or Redis Cluster with automatic node routing (`{...}` hash tags).
+* **Graceful Degradation:** If Redis becomes unreachable, the gateway automatically falls back to an in-memory token bucket, preventing cascading failures or blocked traffic.
+* **Customer Tier Quotas:** Enforces subscription tiers (`Free`: 100 req/min, `Pro`: 5,000 req/min, `Enterprise`: 50,000 req/min) with dynamic key extraction from API keys (`X-API-Key`), JWT credentials, or client IPs.
+* **Standard Headers:** Sets `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset`, `X-RateLimit-Tier`, and standard `Retry-After` on HTTP `429 Too Many Requests`.
 
 ---
 
@@ -29,8 +30,15 @@ The **API Gateway** is the central entrypoint for the Adroit Platform. It handle
 | `ADROIT_ENV` | string | `development` | Deployment environment (`development`, `staging`, `production`). |
 | `ADROIT_LOG_LEVEL` | string | `debug` | Logging verbosity (`debug`, `info`, `warn`, `error`). |
 | `ADROIT_LOG_FORMAT` | string | `json` | Log format (`json` or `text`). |
+| `RATE_LIMIT_BACKEND` | string | `redis` | Storage backend: `redis` or `memory`. |
+| `RATE_LIMIT_ALGORITHM` | string | `token_bucket` | Algorithm: `token_bucket` or `sliding_window`. |
 | `RATE_LIMIT_RPS` | int | `50` | Allowed sustained requests per second per client IP. |
 | `RATE_LIMIT_BURST` | int | `100` | Maximum burst capacity per client IP. |
+| `RATE_LIMIT_TIERS_ENABLED` | bool | `true` | Enable customer subscription tier quotas. |
+| `REDIS_ADDR` | string | `localhost:6379` | Single Redis host address. |
+| `REDIS_ADDRS` | string | `localhost:6379` | Comma-separated list of Redis or Redis Cluster nodes. |
+| `REDIS_PASSWORD` | string | `""` | Redis authentication password. |
+| `REDIS_DB` | int | `0` | Redis logical database index. |
 | `AUTH_SERVICE_URL` | string | `http://localhost:8081` | Downstream Auth Service URL. |
 | `USER_SERVICE_URL` | string | `http://localhost:8082` | Downstream User Service URL. |
 
