@@ -69,7 +69,21 @@ func main() {
 	defer eventBus.Close()
 
 	// 4. Service & Handlers
-	svc := userservice.NewService(repo, userservice.WithPublisher(eventBus))
+	avatarDir := config.GetEnv("AVATAR_UPLOAD_DIR", "data/uploads/avatars")
+	avatarBaseURL := config.GetEnv("AVATAR_BASE_URL", "/api/v1/users/avatars")
+	localStorage, err := userservice.NewLocalStorage(avatarDir, avatarBaseURL)
+	var svcOpts []userservice.Option
+	if eventBus != nil {
+		svcOpts = append(svcOpts, userservice.WithPublisher(eventBus))
+	}
+	if err != nil {
+		log.Warn("Failed to initialize local avatar storage, falling back to default", slog.Any("error", err))
+	} else {
+		svcOpts = append(svcOpts, userservice.WithStorageProvider(localStorage))
+		log.Info("Avatar storage initialized", slog.String("dir", avatarDir), slog.String("base_url", avatarBaseURL))
+	}
+
+	svc := userservice.NewService(repo, svcOpts...)
 	handler := userservice.NewHandler(svc)
 
 	// 5. Chi Router

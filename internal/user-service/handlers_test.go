@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -22,7 +24,8 @@ import (
 func setupUserTestRouter() (chi.Router, *userservice.MemoryRepository, string, *types.User, *types.User) {
 	jwtSecret := "super-secure-testing-secret-key-32b"
 	repo := userservice.NewMemoryRepository()
-	svc := userservice.NewService(repo)
+	inMemStore := userservice.NewInMemStorage("/api/v1/users/avatars")
+	svc := userservice.NewService(repo, userservice.WithStorageProvider(inMemStore))
 	handler := userservice.NewHandler(svc)
 
 	user1 := &types.User{
@@ -375,6 +378,139 @@ func TestInvitationEventEmission(t *testing.T) {
 	if capturedOrg != "Event Corp" {
 		t.Errorf("expected captured org Event Corp, got %s", capturedOrg)
 	}
+}
+
+func TestAvatarUploadAndServeLifecycle(t *testing.T) {
+	r, repo, jwtSecret, alice, _ := setupUserTestRouter()
+	aliceToken, _ := identity.GenerateJWT(alice.ID, alice.Email, jwtSecret, 1*time.Hour)
+
+	// Valid PNG payload (8-byte PNG header + chunk data)
+	pngData := []byte("\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15c4")
+
+	// 1. Upload Avatar
+	body := new(bytes.Buffer)
+	writer := multipart.NewWriter(body)
+	part, err := writer.CreateFormFile("avatar", "profile.png")
+	if err != nil {
+		t.Fatalf("failed to create form file: %v", err)
+	}
+	if _, err := part.Write(pngData); err != nil {
+		t.Fatalf("failed to write png data: %v", err)
+	}
+	_ = writer.Close()
+
+	reqUpload := httptest.NewRequest(http.MethodPost, "/profile/avatar", body)
+	reqUpload.Header.Set("Authorization", "Bearer "+aliceToken)
+	reqUpload.Header.Set("Content-Type", writer.FormDataContentType())
+	recUpload := httptest.NewRecorder()
+	r.ServeHTTP(recUpload, reqUpload)
+
+	if recUpload.Code != http.StatusOK {
+		t.Fatalf("expected 200 on avatar upload, got %d. Body: %s", recUpload.Code, recUpload.Body.String())
+	}
+
+	var res response.APIResponse[userservice.AvatarUploadResponse]
+	if err := json.Unmarshal(recUpload.Body.Bytes(), &res); err != nil {
+		t.Fatalf("failed to parse avatar upload response: %v", err)
+	}
+
+	if !strings.Contains(res.Data.AvatarURL, "avatar_usr-alice-111_") {
+		t.Errorf("expected avatar URL to contain user ID, got %s", res.Data.AvatarURL)
+	}
+
+	// Verify user record in repository
+	updatedUser, _ := repo.GetUser(context.Background(), alice.ID)
+	if updatedUser.AvatarURL != res.Data.AvatarURL {
+		t.Errorf("expected repo avatar URL %s, got %s", res.Data.AvatarURL, updatedUser.AvatarURL)
+	}
+
+	// 2. Fetch Avatar via Public Endpoint
+	// res.Data.AvatarURL is e.g. "/api/v1/users/avatars/avatar_usr-alice-111_..."
+	// The route registered in chi is "/avatars/{filename}"
+	parts := strings.Split(res.Data.AvatarURL, "/avatars/")
+	if len(parts) != 2 {
+		t.Fatalf("invalid avatar URL format: %s", res.Data.AvatarURL)
+	}
+	filename := parts[1]
+
+	reqGet := httptest.NewRequest(http.MethodGet, "/avatars/"+filename, nil)
+	recGet := httptest.NewRecorder()
+	r.ServeHTTP(recGet, reqGet)
+
+	if recGet.Code != http.StatusOK {
+		t.Fatalf("expected 200 on get avatar, got %d", recGet.Code)
+	}
+	if recGet.Header().Get("Content-Type") != "image/png" {
+		t.Errorf("expected Content-Type image/png, got %s", recGet.Header().Get("Content-Type"))
+	}
+	if !bytes.Equal(recGet.Body.Bytes(), pngData) {
+		t.Errorf("served avatar data does not match uploaded content")
+	}
+
+	// 3. Delete Avatar
+	reqDelete := httptest.NewRequest(http.MethodDelete, "/profile/avatar", nil)
+	reqDelete.Header.Set("Authorization", "Bearer "+aliceToken)
+	recDelete := httptest.NewRecorder()
+	r.ServeHTTP(recDelete, reqDelete)
+
+	if recDelete.Code != http.StatusOK {
+		t.Fatalf("expected 200 on delete avatar, got %d", recDelete.Code)
+	}
+
+	clearedUser, _ := repo.GetUser(context.Background(), alice.ID)
+	if clearedUser.AvatarURL != "" {
+		t.Errorf("expected avatar URL to be cleared, got %s", clearedUser.AvatarURL)
+	}
+}
+
+func TestAvatarUploadValidation(t *testing.T) {
+	r, _, jwtSecret, alice, _ := setupUserTestRouter()
+	aliceToken, _ := identity.GenerateJWT(alice.ID, alice.Email, jwtSecret, 1*time.Hour)
+
+	t.Run("Rejects non-image file", func(t *testing.T) {
+		body := new(bytes.Buffer)
+		writer := multipart.NewWriter(body)
+		part, _ := writer.CreateFormFile("avatar", "test.txt")
+		_, _ = part.Write([]byte("this is plain text not an image"))
+		_ = writer.Close()
+
+		req := httptest.NewRequest(http.MethodPost, "/profile/avatar", body)
+		req.Header.Set("Authorization", "Bearer "+aliceToken)
+		req.Header.Set("Content-Type", writer.FormDataContentType())
+		rec := httptest.NewRecorder()
+		r.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("expected 400 for text file, got %d", rec.Code)
+		}
+	})
+
+	t.Run("Requires authentication", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/profile/avatar", nil)
+		rec := httptest.NewRecorder()
+		r.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("expected 401 without token, got %d", rec.Code)
+		}
+	})
+
+	t.Run("Missing avatar field", func(t *testing.T) {
+		body := new(bytes.Buffer)
+		writer := multipart.NewWriter(body)
+		_ = writer.WriteField("other", "value")
+		_ = writer.Close()
+
+		req := httptest.NewRequest(http.MethodPost, "/profile/avatar", body)
+		req.Header.Set("Authorization", "Bearer "+aliceToken)
+		req.Header.Set("Content-Type", writer.FormDataContentType())
+		rec := httptest.NewRecorder()
+		r.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("expected 400 for missing field, got %d", rec.Code)
+		}
+	})
 }
 
 

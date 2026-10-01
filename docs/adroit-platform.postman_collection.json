@@ -713,6 +713,89 @@
 						"description": "Updates caller's display name or avatar URL."
 					},
 					"response": []
+				},
+				{
+					"name": "Upload Avatar",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "formdata",
+							"formdata": [
+								{
+									"key": "avatar",
+									"type": "file",
+									"description": "Image file (JPEG, PNG, WebP, GIF - max 2MB)"
+								}
+							]
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/users/profile/avatar",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"users",
+								"profile",
+								"avatar"
+							]
+						},
+						"description": "Uploads an avatar image from user's device, stores it, and updates profile."
+					},
+					"response": []
+				},
+				{
+					"name": "Delete Avatar",
+					"request": {
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/users/profile/avatar",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"users",
+								"profile",
+								"avatar"
+							]
+						},
+						"description": "Clears the caller's avatar URL."
+					},
+					"response": []
+				},
+				{
+					"name": "Get Avatar Image",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/users/avatars/:filename",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"users",
+								"avatars",
+								":filename"
+							],
+							"variable": [
+								{
+									"key": "filename",
+									"value": "sample.png",
+									"description": "Name of the avatar file"
+								}
+							]
+						},
+						"description": "Publicly serves a user's uploaded avatar image with caching headers."
+					},
+					"response": []
 				}
 			]
 		},

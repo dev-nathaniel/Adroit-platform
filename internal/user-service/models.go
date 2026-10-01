@@ -12,6 +12,12 @@ type UpdateProfileRequest struct {
 	AvatarURL string `json:"avatar_url,omitempty"`
 }
 
+// AvatarUploadResponse contains the uploaded avatar URL and user info
+type AvatarUploadResponse struct {
+	AvatarURL string      `json:"avatar_url"`
+	User      *types.User `json:"user,omitempty"`
+}
+
 // CreateOrgRequest holds parameters for creating a new workspace
 type CreateOrgRequest struct {
 	Name string `json:"name"`

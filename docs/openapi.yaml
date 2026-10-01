@@ -529,6 +529,145 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponseEnvelope'
 
+  /api/v1/users/profile/avatar:
+    post:
+      tags:
+        - User Profiles
+      summary: Upload User Avatar
+      operationId: uploadUserAvatar
+      description: |
+        Uploads an image file from the user's device (`multipart/form-data`) to serve as the user's profile picture.
+        Enforces a 2MB maximum payload limit and verifies magic bytes (`image/jpeg`, `image/png`, `image/webp`, `image/gif`).
+        Stores the image and updates the caller's `avatar_url`.
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                avatar:
+                  type: string
+                  format: binary
+                  description: "Image file to upload (JPEG, PNG, WebP, GIF, max 2MB)"
+              required:
+                - avatar
+      responses:
+        '200':
+          description: Avatar successfully uploaded and user profile updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AvatarUploadResponseEnvelope'
+        '400':
+          description: Invalid file format, missing file, or file exceeds 2MB
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '500':
+          description: Failed to upload avatar
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+
+    delete:
+      tags:
+        - User Profiles
+      summary: Remove User Avatar
+      operationId: removeUserAvatar
+      description: Clears the authenticated caller's profile picture (`avatar_url = ""`).
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Avatar successfully cleared
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponseEnvelope'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '500':
+          description: Failed to remove avatar
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+
+  /api/v1/users/avatars/{filename}:
+    get:
+      tags:
+        - User Profiles
+      summary: Get User Avatar Image
+      operationId: getUserAvatar
+      description: |
+        Public endpoint that serves a user's uploaded avatar image directly.
+        Returns the binary image data with appropriate `Content-Type` and `Cache-Control: public, max-age=86400` caching headers.
+      security: []
+      parameters:
+        - name: filename
+          in: path
+          required: true
+          description: Sanitized avatar filename
+          schema:
+            type: string
+            example: "avatar_usr-111_1727787600_a1b2c3d4.png"
+      responses:
+        '200':
+          description: Image binary stream
+          headers:
+            Content-Type:
+              schema:
+                type: string
+                example: "image/png"
+            Cache-Control:
+              schema:
+                type: string
+                example: "public, max-age=86400"
+          content:
+            image/png:
+              schema:
+                type: string
+                format: binary
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+            image/webp:
+              schema:
+                type: string
+                format: binary
+            image/gif:
+              schema:
+                type: string
+                format: binary
+        '400':
+          description: Invalid filename parameter
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '404':
+          description: Avatar image not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+
   # ==========================================
   # ORGANIZATIONS & WORKSPACES
   # ==========================================
@@ -3630,6 +3769,29 @@ components:
         avatar_url:
           type: string
           example: "https://assets.adroit.run/avatars/new.png"
+
+    AvatarUploadData:
+      type: object
+      properties:
+        avatar_url:
+          type: string
+          example: "/api/v1/users/avatars/avatar_usr-111_1727787600_a1b2c3d4.png"
+        user:
+          $ref: '#/components/schemas/User'
+      required:
+        - avatar_url
+
+    AvatarUploadResponseEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          $ref: '#/components/schemas/AvatarUploadData'
+      required:
+        - success
+        - data
 
     # --- Organization Schemas ---
     Organization:

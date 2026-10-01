@@ -1,10 +1,18 @@
 package userservice
 
 import (
+	"bytes"
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 
 	"github.com/dev-nathaniel/Adroit-platform/pkg/middleware"
 	"github.com/dev-nathaniel/Adroit-platform/pkg/response"
@@ -24,6 +32,7 @@ func NewHandler(service *Service) *Handler {
 func (h *Handler) RegisterRoutes(r chi.Router, jwtSecret string) {
 	// Public Routes (no authentication required)
 	r.Get("/invitations/{token}", h.HandleGetInvitationPreview)
+	r.Get("/avatars/{filename}", h.HandleGetAvatar)
 
 	// Protected Routes (requires valid JWT token)
 	r.Group(func(auth chi.Router) {
@@ -32,6 +41,8 @@ func (h *Handler) RegisterRoutes(r chi.Router, jwtSecret string) {
 		// User Profile
 		auth.Get("/profile", h.HandleGetProfile)
 		auth.Patch("/profile", h.HandleUpdateProfile)
+		auth.Post("/profile/avatar", h.HandleUploadAvatar)
+		auth.Delete("/profile/avatar", h.HandleDeleteAvatar)
 
 		// Organizations
 		auth.Get("/organizations", h.HandleListOrganizations)
@@ -78,6 +89,133 @@ func (h *Handler) HandleUpdateProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	response.JSON(w, http.StatusOK, updated)
+}
+
+// HandleUploadAvatar handles multipart/form-data upload of user profile picture
+func (h *Handler) HandleUploadAvatar(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r.Context())
+	if userID == "" {
+		response.Unauthorized(w, "Authentication required")
+		return
+	}
+
+	// 1. Enforce 2MB maximum payload size
+	const maxUploadSize = 2 << 20 // 2MB
+	r.Body = http.MaxBytesReader(w, r.Body, maxUploadSize)
+	if err := r.ParseMultipartForm(maxUploadSize); err != nil {
+		response.BadRequest(w, "Uploaded file exceeds 2MB limit or invalid form data", nil)
+		return
+	}
+
+	// 2. Locate avatar file in multipart form (check "avatar" then "file")
+	file, fileHeader, err := r.FormFile("avatar")
+	if err != nil {
+		file, fileHeader, err = r.FormFile("file")
+		if err != nil {
+			response.BadRequest(w, "Avatar image file is required under field 'avatar' or 'file'", nil)
+			return
+		}
+	}
+	defer file.Close()
+
+	// 3. Inspect magic bytes for content-type detection
+	buf := make([]byte, 512)
+	n, err := file.Read(buf)
+	if err != nil && err != io.EOF {
+		response.BadRequest(w, "Failed to inspect uploaded file", nil)
+		return
+	}
+
+	contentType := http.DetectContentType(buf[:n])
+	var ext string
+	switch contentType {
+	case "image/jpeg":
+		ext = ".jpg"
+	case "image/png":
+		ext = ".png"
+	case "image/webp":
+		ext = ".webp"
+	case "image/gif":
+		ext = ".gif"
+	default:
+		response.BadRequest(w, "Unsupported file format. Only JPEG, PNG, WebP, and GIF images are allowed", map[string]string{
+			"detected_type": contentType,
+			"filename":      fileHeader.Filename,
+		})
+		return
+	}
+
+	// Reconstruct the file stream from the read magic bytes + rest of file
+	stream := io.MultiReader(bytes.NewReader(buf[:n]), file)
+
+	// 4. Generate unique, collision-resistant filename
+	cleanUserID := strings.ReplaceAll(userID, "/", "_")
+	randomSuffix := uuid.New().String()[:8]
+	filename := fmt.Sprintf("avatar_%s_%d_%s%s", cleanUserID, time.Now().Unix(), randomSuffix, ext)
+
+	// 5. Save to storage & update user record
+	updatedUser, avatarURL, err := h.service.UploadAvatar(r.Context(), userID, filename, stream)
+	if err != nil {
+		response.InternalServerError(w, "Failed to upload avatar")
+		return
+	}
+
+	response.JSON(w, http.StatusOK, AvatarUploadResponse{
+		AvatarURL: avatarURL,
+		User:      updatedUser,
+	})
+}
+
+// HandleDeleteAvatar clears the caller's avatar URL
+func (h *Handler) HandleDeleteAvatar(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r.Context())
+	if userID == "" {
+		response.Unauthorized(w, "Authentication required")
+		return
+	}
+
+	updatedUser, err := h.service.RemoveAvatar(r.Context(), userID)
+	if err != nil {
+		response.InternalServerError(w, "Failed to remove avatar")
+		return
+	}
+
+	response.JSON(w, http.StatusOK, updatedUser)
+}
+
+// HandleGetAvatar serves a stored avatar image by filename
+func (h *Handler) HandleGetAvatar(w http.ResponseWriter, r *http.Request) {
+	filename := chi.URLParam(r, "filename")
+	cleanName := filepath.Base(filepath.Clean(filename))
+	if cleanName == "." || cleanName == "/" || cleanName == "" {
+		response.BadRequest(w, "Invalid filename", nil)
+		return
+	}
+
+	reader, size, err := h.service.Storage().Open(cleanName)
+	if err != nil {
+		if os.IsNotExist(err) {
+			response.NotFound(w, "Avatar not found")
+			return
+		}
+		response.InternalServerError(w, "Failed to retrieve avatar")
+		return
+	}
+	defer reader.Close()
+
+	buf := make([]byte, 512)
+	n, _ := reader.Read(buf)
+	contentType := http.DetectContentType(buf[:n])
+
+	w.Header().Set("Content-Type", contentType)
+	if size > 0 {
+		w.Header().Set("Content-Length", fmt.Sprintf("%d", size))
+	}
+	w.Header().Set("Cache-Control", "public, max-age=86400")
+
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(buf[:n])
+	_, _ = io.Copy(w, reader)
 }
 
 // HandleListOrganizations lists all workspaces for the caller

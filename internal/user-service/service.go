@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"net/mail"
 	"regexp"
 	"strings"
@@ -37,10 +38,20 @@ func WithPublisher(pub events.Publisher) Option {
 	}
 }
 
+// WithStorageProvider configures media/avatar storage provider
+func WithStorageProvider(storage StorageProvider) Option {
+	return func(s *Service) {
+		if storage != nil {
+			s.storage = storage
+		}
+	}
+}
+
 // Service defines user and organization business logic
 type Service struct {
 	repo      Repository
 	publisher events.Publisher
+	storage   StorageProvider
 }
 
 // NewService creates a new user service instance with optional functional configurations
@@ -52,7 +63,20 @@ func NewService(repo Repository, opts ...Option) *Service {
 	for _, opt := range opts {
 		opt(s)
 	}
+	if s.storage == nil {
+		localStore, err := NewLocalStorage("data/uploads/avatars", "/api/v1/users/avatars")
+		if err != nil {
+			s.storage = NewInMemStorage("/api/v1/users/avatars")
+		} else {
+			s.storage = localStore
+		}
+	}
 	return s
+}
+
+// Storage returns the active StorageProvider
+func (s *Service) Storage() StorageProvider {
+	return s.storage
 }
 
 // GetProfile retrieves user profile
@@ -73,6 +97,53 @@ func (s *Service) UpdateProfile(ctx context.Context, userID string, req UpdatePr
 	if strings.TrimSpace(req.AvatarURL) != "" {
 		user.AvatarURL = strings.TrimSpace(req.AvatarURL)
 	}
+	user.UpdatedAt = time.Now().UTC()
+
+	if err := s.repo.UpdateUser(ctx, user); err != nil {
+		return nil, err
+	}
+	return user, nil
+}
+
+// UploadAvatar persists an avatar file to storage and updates user profile
+func (s *Service) UploadAvatar(ctx context.Context, userID, filename string, data io.Reader) (*types.User, string, error) {
+	avatarURL, err := s.storage.Save(ctx, filename, data)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to save avatar to storage: %w", err)
+	}
+
+	user, err := s.UpdateAvatar(ctx, userID, avatarURL)
+	if err != nil {
+		_ = s.storage.Delete(ctx, filename)
+		return nil, "", err
+	}
+	return user, avatarURL, nil
+}
+
+// UpdateAvatar updates a user's avatar URL
+func (s *Service) UpdateAvatar(ctx context.Context, userID, avatarURL string) (*types.User, error) {
+	user, err := s.repo.GetUser(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+
+	user.AvatarURL = strings.TrimSpace(avatarURL)
+	user.UpdatedAt = time.Now().UTC()
+
+	if err := s.repo.UpdateUser(ctx, user); err != nil {
+		return nil, err
+	}
+	return user, nil
+}
+
+// RemoveAvatar clears a user's avatar URL
+func (s *Service) RemoveAvatar(ctx context.Context, userID string) (*types.User, error) {
+	user, err := s.repo.GetUser(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+
+	user.AvatarURL = ""
 	user.UpdatedAt = time.Now().UTC()
 
 	if err := s.repo.UpdateUser(ctx, user); err != nil {
