@@ -70,6 +70,10 @@ The **Orchestration & Runtime Service** manages the workload scheduling, rollout
 5. **Runtime & Scaling Management**:
    - Dynamically scales running instances via `POST /services/{id}/scale` and propagates updates to Nomad task group counts.
 
+6. **Immutable Secret & Configuration Releases (HashiCorp Vault)**:
+   - At deployment time, snapshots runtime environment variables into `deployment_env_snapshots` and writes an immutable snapshot of active secrets to Vault at `adroit/{orgID}/deployments/{deploymentID}`.
+   - Renders Nomad jobs using native `template` stanzas (`destination = "secrets/app.env"`, `env = true`), eliminating plaintext secrets from job specs, Raft state, and CLI inspections.
+
 ---
 
 ## 3. REST API Reference
@@ -102,3 +106,6 @@ The **Orchestration & Runtime Service** manages the workload scheduling, rollout
 | `ORCHESTRATOR_DRIVER_TYPE` | `simulated` | Driver type: `simulated` (local dev) or `nomad` (cluster) |
 | `NATS_URL` | `nats://localhost:4222` | NATS JetStream server address |
 | `JWT_SECRET` | *(dev key)* | Secret key for verifying auth bearer tokens |
+| `VAULT_ADDR` | `http://127.0.0.1:8200` | HashiCorp Vault server address |
+| `VAULT_TOKEN` | `adroit-dev-root-token` | HashiCorp Vault authentication token |
+

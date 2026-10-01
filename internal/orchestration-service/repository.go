@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"sort"
 	"time"
 
 	"github.com/google/uuid"
@@ -36,6 +38,9 @@ type Repository interface {
 	GetService(ctx context.Context, serviceID string) (*types.Service, error)
 	GetBuild(ctx context.Context, buildID string) (*types.Build, error)
 	GetEnvironmentVariables(ctx context.Context, serviceID string, projectID *string) (map[string]string, error)
+	GetEnvironmentVariablesDetailed(ctx context.Context, serviceID string, projectID *string) (nonSecret map[string]string, secretKeys []string, err error)
+	CreateDeploymentEnvSnapshot(ctx context.Context, snapshot *types.DeploymentEnvSnapshot) error
+	GetDeploymentEnvSnapshot(ctx context.Context, deploymentID string) (*types.DeploymentEnvSnapshot, error)
 	UpdateServiceActiveDeployment(ctx context.Context, serviceID, deploymentID string) error
 	UpdateServiceReplicas(ctx context.Context, serviceID string, replicas int) error
 	MarkPreviousDeploymentsReplaced(ctx context.Context, serviceID, currentDeploymentID string) error
@@ -728,3 +733,129 @@ func (r *PostgresRepository) MarkPreviousDeploymentsReplaced(ctx context.Context
 	_, err := r.db.ExecContext(ctx, query, serviceID, currentDeploymentID, time.Now().UTC())
 	return err
 }
+
+// GetEnvironmentVariablesDetailed loads runtime environment variables, separating non-secret variables from secret keys
+func (r *PostgresRepository) GetEnvironmentVariablesDetailed(ctx context.Context, serviceID string, projectID *string) (map[string]string, []string, error) {
+	nonSecret := make(map[string]string)
+	secretKeyMap := make(map[string]bool)
+
+	// 1. Load project-level variables
+	if projectID != nil && *projectID != "" {
+		rows, err := r.db.QueryContext(ctx, `SELECT key, value, is_secret FROM environment_variables WHERE project_id = $1 AND scope IN ('runtime', 'all')`, *projectID)
+		if err == nil {
+			defer rows.Close()
+			for rows.Next() {
+				var k, v string
+				var isSecret bool
+				if err := rows.Scan(&k, &v, &isSecret); err == nil {
+					if isSecret {
+						secretKeyMap[k] = true
+						delete(nonSecret, k)
+					} else {
+						nonSecret[k] = v
+						delete(secretKeyMap, k)
+					}
+				}
+			}
+		}
+	}
+
+	// 2. Load service-level variables (overrides project)
+	rows, err := r.db.QueryContext(ctx, `SELECT key, value, is_secret FROM environment_variables WHERE service_id = $1 AND scope IN ('runtime', 'all')`, serviceID)
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var k, v string
+			var isSecret bool
+			if err := rows.Scan(&k, &v, &isSecret); err == nil {
+				if isSecret {
+					secretKeyMap[k] = true
+					delete(nonSecret, k)
+				} else {
+					nonSecret[k] = v
+					delete(secretKeyMap, k)
+				}
+			}
+		}
+	}
+
+	secretKeys := make([]string, 0, len(secretKeyMap))
+	for k := range secretKeyMap {
+		secretKeys = append(secretKeys, k)
+	}
+	sort.Strings(secretKeys)
+
+	return nonSecret, secretKeys, nil
+}
+
+// CreateDeploymentEnvSnapshot stores an immutable snapshot of configuration for a deployment
+func (r *PostgresRepository) CreateDeploymentEnvSnapshot(ctx context.Context, snap *types.DeploymentEnvSnapshot) error {
+	varsJSON, err := json.Marshal(snap.Variables)
+	if err != nil {
+		varsJSON = []byte("{}")
+	}
+	secretsJSON, err := json.Marshal(snap.SecretKeys)
+	if err != nil {
+		secretsJSON = []byte("[]")
+	}
+
+	query := `
+		INSERT INTO deployment_env_snapshots (id, deployment_id, service_id, config_release_num, variables, secret_keys, vault_snapshot_path, target_env, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		ON CONFLICT (deployment_id) DO UPDATE SET
+			variables = EXCLUDED.variables,
+			secret_keys = EXCLUDED.secret_keys,
+			vault_snapshot_path = EXCLUDED.vault_snapshot_path,
+			target_env = EXCLUDED.target_env
+	`
+	if snap.ID == "" {
+		snap.ID = uuid.New().String()
+	}
+	if snap.CreatedAt.IsZero() {
+		snap.CreatedAt = time.Now().UTC()
+	}
+	targetEnv := string(snap.TargetEnv)
+	if targetEnv == "" {
+		targetEnv = "production"
+	}
+
+	var vaultPath sql.NullString
+	if snap.VaultSnapshotPath != "" {
+		vaultPath = sql.NullString{String: snap.VaultSnapshotPath, Valid: true}
+	}
+
+	_, err = r.db.ExecContext(ctx, query, snap.ID, snap.DeploymentID, snap.ServiceID, snap.ConfigReleaseNum, varsJSON, secretsJSON, vaultPath, targetEnv, snap.CreatedAt)
+	return err
+}
+
+// GetDeploymentEnvSnapshot retrieves the immutable snapshot of a deployment's environment
+func (r *PostgresRepository) GetDeploymentEnvSnapshot(ctx context.Context, deploymentID string) (*types.DeploymentEnvSnapshot, error) {
+	query := `
+		SELECT id, deployment_id, service_id, config_release_num, variables, secret_keys, vault_snapshot_path, target_env, created_at
+		FROM deployment_env_snapshots
+		WHERE deployment_id = $1
+	`
+	var s types.DeploymentEnvSnapshot
+	var varsJSON, secretsJSON []byte
+	var vaultPath sql.NullString
+	var targetEnv string
+
+	err := r.db.QueryRowContext(ctx, query, deploymentID).Scan(
+		&s.ID, &s.DeploymentID, &s.ServiceID, &s.ConfigReleaseNum, &varsJSON, &secretsJSON, &vaultPath, &targetEnv, &s.CreatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrDeploymentNotFound
+		}
+		return nil, fmt.Errorf("failed to query deployment snapshot: %w", err)
+	}
+
+	_ = json.Unmarshal(varsJSON, &s.Variables)
+	_ = json.Unmarshal(secretsJSON, &s.SecretKeys)
+	if vaultPath.Valid {
+		s.VaultSnapshotPath = vaultPath.String
+	}
+	s.TargetEnv = types.EnvVarTargetEnv(targetEnv)
+	return &s, nil
+}
+

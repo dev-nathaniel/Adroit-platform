@@ -233,6 +233,25 @@ func (m *mockRepository) GetEnvironmentVariables(ctx context.Context, serviceID 
 	return res, nil
 }
 
+func (m *mockRepository) GetEnvironmentVariablesDetailed(ctx context.Context, serviceID string, projectID *string) (map[string]string, []string, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	res := make(map[string]string)
+	for k, v := range m.envVars[serviceID] {
+		res[k] = v
+	}
+	return res, nil, nil
+}
+
+func (m *mockRepository) CreateDeploymentEnvSnapshot(ctx context.Context, snapshot *types.DeploymentEnvSnapshot) error {
+	return nil
+}
+
+func (m *mockRepository) GetDeploymentEnvSnapshot(ctx context.Context, deploymentID string) (*types.DeploymentEnvSnapshot, error) {
+	return nil, ErrDeploymentNotFound
+}
+
+
 func (m *mockRepository) UpdateServiceActiveDeployment(ctx context.Context, serviceID, deploymentID string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()

@@ -20,11 +20,12 @@ type JobConfig struct {
 	Port         int
 	Replicas     int
 	Resources    types.ResourceLimits
-	HealthCheck  types.HealthCheckConfig
-	EnvVars      map[string]string
-	RuntimeTier  types.RuntimeTier
-	Strategy     types.RolloutStrategy
-	Datacenter   string
+	HealthCheck     types.HealthCheckConfig
+	EnvVars         map[string]string
+	VaultSecretPath string
+	RuntimeTier     types.RuntimeTier
+	Strategy        types.RolloutStrategy
+	Datacenter      string
 }
 
 // GenerateJobSpec produces an authentic, production-grade Nomad HCL2 job specification (.nomad.hcl)
@@ -167,6 +168,24 @@ func GenerateJobSpec(cfg JobConfig) (string, error) {
 		}
 	}
 
+	// Optional Nomad template stanza for HashiCorp Vault secrets integration
+	var templateStanza string
+	if cfg.VaultSecretPath != "" {
+		templateStanza = fmt.Sprintf(`
+      template {
+        data = <<EOH
+{{ with secret %q }}
+{{ range $k, $v := .Data.data }}
+{{ $k }}="{{ $v }}"
+{{ end }}
+{{ end }}
+EOH
+        destination = "secrets/app.env"
+        env         = true
+      }
+`, cfg.VaultSecretPath)
+	}
+
 	// Build full HCL spec
 	hcl := fmt.Sprintf(`# ==============================================================================
 # Adroit Platform — Production Workload Job Specification (Nomad)
@@ -255,7 +274,7 @@ job %q {
         ADROIT_DEPLOY_ID = %q
         ADROIT_SERVICE_ID = %q
 %s      }
-
+%s
       resources {
         cpu    = %d
         memory = %d
@@ -281,6 +300,7 @@ job %q {
 		cfg.ImageTag, driverConfigExtra,
 		port, cfg.DeploymentID, cfg.ServiceID,
 		envBlock.String(),
+		templateStanza,
 		cpuMHz, memoryMB,
 	)
 

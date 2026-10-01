@@ -116,6 +116,38 @@ func TestGenerateJobSpec(t *testing.T) {
 			t.Errorf("expected runsc gVisor runtime in isolated tier")
 		}
 	})
+
+	t.Run("Vault Secret Integration via Template Stanza", func(t *testing.T) {
+		cfg := JobConfig{
+			DeploymentID:    "dep-vault-1",
+			ServiceID:       "svc-vault-app",
+			ServiceName:     "Vault Integrated App",
+			ServiceSlug:     "vault-app",
+			ImageTag:        "registry.adroit.run/acme/app:v2.0",
+			VaultSecretPath: "secret/data/adroit/org-123/deployments/dep-vault-1",
+			EnvVars: map[string]string{
+				"PUBLIC_ENV": "active",
+			},
+		}
+
+		spec, err := GenerateJobSpec(cfg)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if !strings.Contains(spec, `template {`) {
+			t.Errorf("expected template stanza for vault integration")
+		}
+		if !strings.Contains(spec, `with secret "secret/data/adroit/org-123/deployments/dep-vault-1"`) {
+			t.Errorf("expected vault secret query in template")
+		}
+		if !strings.Contains(spec, `destination = "secrets/app.env"`) {
+			t.Errorf("expected secrets/app.env destination in template")
+		}
+		if !strings.Contains(spec, `PUBLIC_ENV = "active"`) {
+			t.Errorf("expected non-secret env var in env block")
+		}
+	})
 }
 
 func TestSimulatedDriver(t *testing.T) {

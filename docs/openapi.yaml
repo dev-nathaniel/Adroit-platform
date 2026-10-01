@@ -1282,6 +1282,43 @@ paths:
               schema:
                 $ref: '#/components/schemas/MessageResponseEnvelope'
 
+  /api/v1/projects/{id}/env/{key}/reveal:
+    post:
+      tags:
+        - Projects
+        - Environment Variables
+      summary: Reveal Project Secret from Vault
+      description: Retrieves the unmasked secret value directly from HashiCorp Vault for authorized project members.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Project UUID
+          schema:
+            type: string
+            format: uuid
+        - name: key
+          in: path
+          required: true
+          description: Environment variable key name
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Secret value revealed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RevealSecretResponseEnvelope'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
   # ==========================================
   # SERVICES
   # ==========================================
@@ -1561,6 +1598,43 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/MessageResponseEnvelope'
+
+  /api/v1/services/{id}/env/{key}/reveal:
+    post:
+      tags:
+        - Services
+        - Environment Variables
+      summary: Reveal Service Secret from Vault
+      description: Retrieves the unmasked secret value directly from HashiCorp Vault for authorized service members.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Service UUID
+          schema:
+            type: string
+            format: uuid
+        - name: key
+          in: path
+          required: true
+          description: Environment variable key name
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Secret value revealed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RevealSecretResponseEnvelope'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
 
   # ==========================================
   # GIT INTEGRATION & WEBHOOKS
@@ -4271,6 +4345,20 @@ components:
         is_secret:
           type: boolean
           default: false
+        scope:
+          type: string
+          enum: [runtime, build, all]
+          default: all
+          description: Execution phase where this variable is available.
+        target_env:
+          type: string
+          enum: [all, production, staging, preview, development]
+          default: all
+          description: Environment target where this variable takes effect.
+        vault_path:
+          type: string
+          example: "adroit/org-123/services/svc-456"
+          description: Vault KV engine path where the secret is stored.
 
     SetEnvVarsRequest:
       type: object
@@ -4303,8 +4391,21 @@ components:
           type: string
         value:
           type: string
+          description: Plaintext value or masked string (••••••••) if is_secret is true.
         is_secret:
           type: boolean
+        scope:
+          type: string
+          enum: [runtime, build, all]
+          example: all
+        target_env:
+          type: string
+          enum: [all, production, staging, preview, development]
+          example: all
+        vault_path:
+          type: string
+          nullable: true
+          example: "adroit/org-123/services/svc-456"
         created_at:
           type: string
           format: date-time
@@ -4350,6 +4451,89 @@ components:
       required:
         - success
         - data
+
+    RevealSecretResponse:
+      type: object
+      properties:
+        key:
+          type: string
+          example: "DATABASE_PASSWORD"
+        value:
+          type: string
+          example: "super-secret-production-pw"
+        vault_path:
+          type: string
+          example: "adroit/org-123/services/svc-456"
+      required:
+        - key
+        - value
+
+    RevealSecretResponseEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          $ref: '#/components/schemas/RevealSecretResponse'
+      required:
+        - success
+        - data
+
+    DeploymentEnvSnapshot:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        deployment_id:
+          type: string
+          format: uuid
+        service_id:
+          type: string
+          format: uuid
+        config_release_num:
+          type: integer
+          example: 1
+        variables:
+          type: object
+          additionalProperties:
+            type: string
+        secret_keys:
+          type: array
+          items:
+            type: string
+        vault_snapshot_path:
+          type: string
+          example: "adroit/org-123/deployments/dep-456"
+        target_env:
+          type: string
+          enum: [all, production, staging, preview, development]
+        created_at:
+          type: string
+          format: date-time
+      required:
+        - id
+        - deployment_id
+        - service_id
+        - config_release_num
+        - variables
+        - secret_keys
+        - target_env
+        - created_at
+
+    DeploymentEnvSnapshotResponseEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          $ref: '#/components/schemas/DeploymentEnvSnapshot'
+      required:
+        - success
+        - data
+
 
     WebhookResultEnvelope:
       type: object

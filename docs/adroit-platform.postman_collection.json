@@ -1101,7 +1101,7 @@
 								"env"
 							]
 						},
-						"description": "Returns shared environment variables configured at the project level."
+						"description": "Returns shared environment variables configured at the project level. Secret values are returned masked as ••••••••."
 					},
 					"response": []
 				},
@@ -1117,7 +1117,7 @@
 						],
 						"body": {
 							"mode": "raw",
-							"raw": "{\n  \"variables\": [\n    {\n      \"key\": \"COMMON_LOG_LEVEL\",\n      \"value\": \"info\",\n      \"is_secret\": false\n    },\n    {\n      \"key\": \"SHARED_API_KEY\",\n      \"value\": \"sk_shared_live_999\",\n      \"is_secret\": true\n    }\n  ]\n}"
+							"raw": "{\n  \"variables\": [\n    {\n      \"key\": \"COMMON_LOG_LEVEL\",\n      \"value\": \"info\",\n      \"is_secret\": false,\n      \"scope\": \"all\",\n      \"target_env\": \"all\"\n    },\n    {\n      \"key\": \"SHARED_API_KEY\",\n      \"value\": \"sk_shared_live_999\",\n      \"is_secret\": true,\n      \"scope\": \"runtime\",\n      \"target_env\": \"all\"\n    }\n  ]\n}"
 						},
 						"url": {
 							"raw": "{{baseUrl}}/api/v1/projects/{{projectId}}/env",
@@ -1132,7 +1132,54 @@
 								"env"
 							]
 						},
-						"description": "Batches and sets project-level environment variables."
+						"description": "Batches and sets project-level environment variables. Sensitive variables (is_secret: true) are stored encrypted in HashiCorp Vault at adroit/{orgID}/projects/{projectID} and replaced by sentinels in the database."
+					},
+					"response": []
+				},
+				{
+					"name": "Reveal Project Secret from Vault",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/projects/{{projectId}}/env/SHARED_API_KEY/reveal",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"projects",
+								"{{projectId}}",
+								"env",
+								"SHARED_API_KEY",
+								"reveal"
+							]
+						},
+						"description": "Unmasks and returns the raw secret value directly from HashiCorp Vault for authorized project members. Request is audit logged."
+					},
+					"response": []
+				},
+				{
+					"name": "Delete Project Env Var",
+					"request": {
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/projects/{{projectId}}/env/COMMON_LOG_LEVEL",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"projects",
+								"{{projectId}}",
+								"env",
+								"COMMON_LOG_LEVEL"
+							]
+						},
+						"description": "Deletes an environment variable or secret from the project configuration and Vault."
 					},
 					"response": []
 				}
@@ -1301,6 +1348,28 @@
 					"response": []
 				},
 				{
+					"name": "Get Service Env Vars",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/services/{{serviceId}}/env",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"services",
+								"{{serviceId}}",
+								"env"
+							]
+						},
+						"description": "Returns environment variables configured directly on the service. Secret values are returned masked as ••••••••."
+					},
+					"response": []
+				},
+				{
 					"name": "Set Service Env Vars",
 					"request": {
 						"method": "POST",
@@ -1312,7 +1381,7 @@
 						],
 						"body": {
 							"mode": "raw",
-							"raw": "{\n  \"variables\": [\n    {\n      \"key\": \"PORT\",\n      \"value\": \"8080\",\n      \"is_secret\": false\n    },\n    {\n      \"key\": \"DATABASE_URL\",\n      \"value\": \"postgres://localhost:5432/app\",\n      \"is_secret\": true\n    }\n  ]\n}"
+							"raw": "{\n  \"variables\": [\n    {\n      \"key\": \"PORT\",\n      \"value\": \"8080\",\n      \"is_secret\": false,\n      \"scope\": \"all\",\n      \"target_env\": \"all\"\n    },\n    {\n      \"key\": \"DATABASE_URL\",\n      \"value\": \"postgres://user:secretpass@localhost:5432/app\",\n      \"is_secret\": true,\n      \"scope\": \"runtime\",\n      \"target_env\": \"all\"\n    },\n    {\n      \"key\": \"NPM_TOKEN\",\n      \"value\": \"npm_token_secret_12345\",\n      \"is_secret\": true,\n      \"scope\": \"build\",\n      \"target_env\": \"all\"\n    }\n  ]\n}"
 						},
 						"url": {
 							"raw": "{{baseUrl}}/api/v1/services/{{serviceId}}/env",
@@ -1327,7 +1396,7 @@
 								"env"
 							]
 						},
-						"description": "Sets or updates service-level environment variables."
+						"description": "Sets or updates service-level environment variables. Secrets are stored in HashiCorp Vault at adroit/{orgID}/services/{serviceID}. Scopes (runtime, build, all) determine whether variables are passed to BuildKit or Nomad."
 					},
 					"response": []
 				},
@@ -1355,7 +1424,54 @@
 								}
 							]
 						},
-						"description": "Returns runtime-resolved environment variables (project vars inherited, with service vars overriding)."
+						"description": "Returns runtime-resolved environment variables (project vars inherited, with service vars overriding). Masks secret values."
+					},
+					"response": []
+				},
+				{
+					"name": "Reveal Service Secret from Vault",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/services/{{serviceId}}/env/DATABASE_URL/reveal",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"services",
+								"{{serviceId}}",
+								"env",
+								"DATABASE_URL",
+								"reveal"
+							]
+						},
+						"description": "Unmasks and returns the raw secret value directly from HashiCorp Vault for authorized service members. Request is audit logged."
+					},
+					"response": []
+				},
+				{
+					"name": "Delete Service Env Var",
+					"request": {
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/services/{{serviceId}}/env/PORT",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"services",
+								"{{serviceId}}",
+								"env",
+								"PORT"
+							]
+						},
+						"description": "Deletes an environment variable or secret from the service configuration and Vault."
 					},
 					"response": []
 				},
@@ -2765,5 +2881,3 @@
 		}
 	]
 }
-
-

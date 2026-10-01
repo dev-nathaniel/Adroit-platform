@@ -15,6 +15,7 @@ import (
 	"github.com/dev-nathaniel/Adroit-platform/pkg/events"
 	"github.com/dev-nathaniel/Adroit-platform/pkg/orchestrator"
 	"github.com/dev-nathaniel/Adroit-platform/pkg/types"
+	"github.com/dev-nathaniel/Adroit-platform/pkg/vault"
 )
 
 var (
@@ -33,11 +34,12 @@ type ServiceConfig struct {
 
 // Service manages the end-to-end workload scheduling lifecycle on Nomad
 type Service struct {
-	repo     Repository
-	driver   orchestrator.Driver
-	eventBus events.EventBus
-	logger   *slog.Logger
-	cfg      ServiceConfig
+	repo        Repository
+	driver      orchestrator.Driver
+	eventBus    events.EventBus
+	logger      *slog.Logger
+	cfg         ServiceConfig
+	secretStore vault.SecretStore
 
 	mu             sync.Mutex
 	activeRollouts map[string]context.CancelFunc
@@ -60,6 +62,14 @@ func WithLogger(log *slog.Logger) Option {
 	}
 }
 
+// WithSecretStore sets the Vault secret store for orchestration
+func WithSecretStore(store vault.SecretStore) Option {
+	return func(s *Service) {
+		s.secretStore = store
+	}
+}
+
+
 // NewService creates an initialized Orchestration & Runtime Service
 func NewService(repo Repository, driver orchestrator.Driver, cfg ServiceConfig, opts ...Option) *Service {
 	if cfg.Datacenter == "" {
@@ -81,6 +91,7 @@ func NewService(repo Repository, driver orchestrator.Driver, cfg ServiceConfig, 
 		logger:         slog.Default(),
 		cfg:            cfg,
 		activeRollouts: make(map[string]context.CancelFunc),
+		secretStore:    vault.NewSimulatedSecretStore(),
 	}
 
 	for _, opt := range opts {
@@ -169,14 +180,45 @@ func (s *Service) HandleDeployRequested(ctx context.Context, payload events.Depl
 		}
 	}
 
-	// 3. Resolve Environment Variables (hierarchical project + service merge)
-	envVars := payload.EnvVars
-	if len(envVars) == 0 {
-		resolved, err := s.repo.GetEnvironmentVariables(ctx, svc.ID, svc.ProjectID)
-		if err == nil && len(resolved) > 0 {
-			envVars = resolved
+	// 3. Resolve Environment Variables and Vault Secrets
+	nonSecretVars, secretKeys, _ := s.repo.GetEnvironmentVariablesDetailed(ctx, svc.ID, svc.ProjectID)
+	if len(payload.EnvVars) > 0 {
+		for k, v := range payload.EnvVars {
+			nonSecretVars[k] = v
 		}
 	}
+
+	var vaultSecretPath string
+	if len(secretKeys) > 0 {
+		secretsMap := make(map[string]string)
+		if svc.ProjectID != nil && *svc.ProjectID != "" {
+			pSecrets, _ := s.secretStore.GetSecrets(ctx, svc.OrganizationID, vault.ScopeProject, *svc.ProjectID)
+			for k, v := range pSecrets {
+				secretsMap[k] = v
+			}
+		}
+		sSecrets, _ := s.secretStore.GetSecrets(ctx, svc.OrganizationID, vault.ScopeService, svc.ID)
+		for k, v := range sSecrets {
+			secretsMap[k] = v
+		}
+
+		snapPath, err := s.secretStore.SnapshotDeployment(ctx, svc.OrganizationID, deployment.ID, secretsMap)
+		if err == nil {
+			vaultSecretPath = snapPath
+		}
+	}
+
+	// Persist immutable DeploymentEnvSnapshot
+	_ = s.repo.CreateDeploymentEnvSnapshot(ctx, &types.DeploymentEnvSnapshot{
+		DeploymentID:      deployment.ID,
+		ServiceID:         svc.ID,
+		ConfigReleaseNum:  1,
+		Variables:         nonSecretVars,
+		SecretKeys:        secretKeys,
+		VaultSnapshotPath: vaultSecretPath,
+		TargetEnv:         types.EnvVarTargetEnvProduction,
+		CreatedAt:         time.Now().UTC(),
+	})
 
 	strategy := deployment.Strategy
 	if strategy == "" {
@@ -190,19 +232,20 @@ func (s *Service) HandleDeployRequested(ctx context.Context, payload events.Depl
 
 	// 4. Translate configuration into Nomad HCL2 Job Specification
 	jobCfg := orchestrator.JobConfig{
-		DeploymentID: deployment.ID,
-		ServiceID:    svc.ID,
-		ServiceName:  svc.Name,
-		ServiceSlug:  svc.Slug,
-		ImageTag:     payload.ImageTag,
-		Port:         payload.Port,
-		Replicas:     replicas,
-		Resources:    payload.Resources,
-		HealthCheck:  payload.HealthCheck,
-		EnvVars:      envVars,
-		RuntimeTier:  payload.RuntimeTier,
-		Strategy:     strategy,
-		Datacenter:   s.cfg.Datacenter,
+		DeploymentID:    deployment.ID,
+		ServiceID:       svc.ID,
+		ServiceName:     svc.Name,
+		ServiceSlug:     svc.Slug,
+		ImageTag:        payload.ImageTag,
+		Port:            payload.Port,
+		Replicas:        replicas,
+		Resources:       payload.Resources,
+		HealthCheck:     payload.HealthCheck,
+		EnvVars:         nonSecretVars,
+		VaultSecretPath: vaultSecretPath,
+		RuntimeTier:     payload.RuntimeTier,
+		Strategy:        strategy,
+		Datacenter:      s.cfg.Datacenter,
 	}
 
 	specHCL, err := orchestrator.GenerateJobSpec(jobCfg)
