@@ -19,6 +19,7 @@ import (
 	"github.com/dev-nathaniel/Adroit-platform/pkg/logger"
 	"github.com/dev-nathaniel/Adroit-platform/pkg/middleware"
 	"github.com/dev-nathaniel/Adroit-platform/pkg/response"
+	"github.com/dev-nathaniel/Adroit-platform/pkg/vault"
 )
 
 func main() {
@@ -68,8 +69,30 @@ func main() {
 	}
 	defer eventBus.Close()
 
-	// 4. Service & Handlers
-	svc := projectservice.NewService(repo, projectservice.WithPublisher(eventBus))
+	// 4. Initialize Vault Secret Store (with Simulated fallback for local dev)
+	vaultAddr := config.GetEnv("VAULT_ADDR", "http://127.0.0.1:8200")
+	vaultToken := config.GetEnv("VAULT_TOKEN", "root")
+	vaultMount := config.GetEnv("VAULT_MOUNT", "secret")
+	var secretStore vault.SecretStore
+	vaultClient := vault.NewVaultHTTPClient(vault.VaultConfig{
+		Address: vaultAddr,
+		Token:   vaultToken,
+		Mount:   vaultMount,
+	})
+	if err := vaultClient.Health(context.Background()); err != nil {
+		log.Warn("Vault unreachable, using simulated secret store fallback", slog.Any("error", err))
+		secretStore = vault.NewSimulatedSecretStore()
+	} else {
+		log.Info("Connected to HashiCorp Vault KV v2 secret engine", slog.String("addr", vaultAddr))
+		secretStore = vault.NewVaultSecretStore(vaultClient)
+	}
+
+	// 5. Service & Handlers
+	svc := projectservice.NewService(
+		repo,
+		projectservice.WithPublisher(eventBus),
+		projectservice.WithSecretStore(secretStore),
+	)
 	handler := projectservice.NewHandler(svc)
 
 	// 5. Chi Router

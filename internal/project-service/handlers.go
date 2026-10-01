@@ -41,6 +41,7 @@ func (h *Handler) RegisterRoutes(r chi.Router, jwtSecret string) {
 			pr.Get("/{id}/env", h.HandleGetProjectEnv)
 			pr.Post("/{id}/env", h.HandleSetProjectEnv)
 			pr.Delete("/{id}/env/{key}", h.HandleDeleteProjectEnv)
+			pr.Post("/{id}/env/{key}/reveal", h.HandleRevealProjectSecret)
 		})
 
 		// Services
@@ -56,6 +57,7 @@ func (h *Handler) RegisterRoutes(r chi.Router, jwtSecret string) {
 			sr.Get("/{id}/env", h.HandleGetServiceEnv)
 			sr.Post("/{id}/env", h.HandleSetServiceEnv)
 			sr.Delete("/{id}/env/{key}", h.HandleDeleteServiceEnv)
+			sr.Post("/{id}/env/{key}/reveal", h.HandleRevealServiceSecret)
 		})
 	})
 }
@@ -404,6 +406,34 @@ func (h *Handler) HandleDeleteProjectEnv(w http.ResponseWriter, r *http.Request)
 	response.JSON(w, http.StatusOK, map[string]string{
 		"message": "Project environment variable deleted successfully",
 	})
+}
+
+// HandleRevealServiceSecret returns the unmasked secret value for a service
+func (h *Handler) HandleRevealServiceSecret(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r.Context())
+	serviceID := chi.URLParam(r, "id")
+	key := chi.URLParam(r, "key")
+
+	resp, err := h.service.RevealServiceSecret(r.Context(), userID, serviceID, key)
+	if err != nil {
+		h.handleError(w, err)
+		return
+	}
+	response.JSON(w, http.StatusOK, resp)
+}
+
+// HandleRevealProjectSecret returns the unmasked secret value for a project
+func (h *Handler) HandleRevealProjectSecret(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r.Context())
+	projectID := chi.URLParam(r, "id")
+	key := chi.URLParam(r, "key")
+
+	resp, err := h.service.RevealProjectSecret(r.Context(), userID, projectID, key)
+	if err != nil {
+		h.handleError(w, err)
+		return
+	}
+	response.JSON(w, http.StatusOK, resp)
 }
 
 // handleError maps internal errors to HTTP responses

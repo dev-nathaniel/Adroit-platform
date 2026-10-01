@@ -257,6 +257,14 @@ func (m *MockRepository) SetServiceEnvVars(ctx context.Context, orgID, serviceID
 	}
 	now := time.Now().UTC()
 	for _, v := range vars {
+		scope := v.Scope
+		if scope == "" {
+			scope = types.EnvVarScopeAll
+		}
+		targetEnv := v.TargetEnv
+		if targetEnv == "" {
+			targetEnv = types.EnvVarTargetEnvAll
+		}
 		m.serviceEnvs[serviceID][v.Key] = types.EnvironmentVariable{
 			ID:             fmt.Sprintf("env_%s_%s", serviceID, v.Key),
 			OrganizationID: orgID,
@@ -264,6 +272,9 @@ func (m *MockRepository) SetServiceEnvVars(ctx context.Context, orgID, serviceID
 			Key:            v.Key,
 			Value:          v.Value,
 			IsSecret:       v.IsSecret,
+			Scope:          scope,
+			TargetEnv:      targetEnv,
+			VaultPath:      v.VaultPath,
 			CreatedAt:      now,
 			UpdatedAt:      now,
 		}
@@ -303,6 +314,14 @@ func (m *MockRepository) SetProjectEnvVars(ctx context.Context, orgID, projectID
 	}
 	now := time.Now().UTC()
 	for _, v := range vars {
+		scope := v.Scope
+		if scope == "" {
+			scope = types.EnvVarScopeAll
+		}
+		targetEnv := v.TargetEnv
+		if targetEnv == "" {
+			targetEnv = types.EnvVarTargetEnvAll
+		}
 		m.projectEnvs[projectID][v.Key] = types.EnvironmentVariable{
 			ID:             fmt.Sprintf("env_%s_%s", projectID, v.Key),
 			OrganizationID: orgID,
@@ -310,6 +329,9 @@ func (m *MockRepository) SetProjectEnvVars(ctx context.Context, orgID, projectID
 			Key:            v.Key,
 			Value:          v.Value,
 			IsSecret:       v.IsSecret,
+			Scope:          scope,
+			TargetEnv:      targetEnv,
+			VaultPath:      v.VaultPath,
 			CreatedAt:      now,
 			UpdatedAt:      now,
 		}
@@ -340,3 +362,26 @@ func (m *MockRepository) DeleteProjectEnvVar(ctx context.Context, projectID, key
 	}
 	return ErrNotFound
 }
+
+func (m *MockRepository) GetEnvVarByKey(ctx context.Context, serviceID *string, projectID *string, key string) (*types.EnvironmentVariable, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if serviceID != nil {
+		if envs, ok := m.serviceEnvs[*serviceID]; ok {
+			if ev, exists := envs[key]; exists {
+				copyEV := ev
+				return &copyEV, nil
+			}
+		}
+	}
+	if projectID != nil {
+		if envs, ok := m.projectEnvs[*projectID]; ok {
+			if ev, exists := envs[key]; exists {
+				copyEV := ev
+				return &copyEV, nil
+			}
+		}
+	}
+	return nil, ErrNotFound
+}
+

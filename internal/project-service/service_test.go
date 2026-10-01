@@ -282,5 +282,34 @@ func TestProjectService_EnvironmentVariables(t *testing.T) {
 		if resolved["DATABASE_URL"] != "postgres://localhost:5432/mydb" {
 			t.Errorf("expected service DATABASE_URL, got '%s'", resolved["DATABASE_URL"])
 		}
+
+		// Verify API GET masks secrets
+		apiVars, err := svc.GetServiceEnvVars(ctx, userID, service.ID)
+		if err != nil {
+			t.Fatalf("failed to get service env vars: %v", err)
+		}
+		for _, ev := range apiVars {
+			if ev.Key == "DATABASE_URL" {
+				if ev.Value != "••••••••" {
+					t.Errorf("expected masked secret value '••••••••', got '%s'", ev.Value)
+				}
+				if !ev.IsSecret {
+					t.Errorf("expected IsSecret to be true")
+				}
+			}
+		}
+
+		// Verify Reveal endpoint retrieves raw secret from Vault
+		revealed, err := svc.RevealServiceSecret(ctx, userID, service.ID, "DATABASE_URL")
+		if err != nil {
+			t.Fatalf("failed to reveal secret: %v", err)
+		}
+		if revealed.Value != "postgres://localhost:5432/mydb" {
+			t.Errorf("expected revealed secret 'postgres://localhost:5432/mydb', got '%s'", revealed.Value)
+		}
+		if revealed.VaultPath == "" {
+			t.Errorf("expected non-empty VaultPath in revealed secret response")
+		}
 	})
 }
+

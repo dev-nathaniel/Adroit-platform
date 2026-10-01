@@ -174,17 +174,53 @@ type Service struct {
 	UpdatedAt          time.Time         `json:"updated_at"`
 }
 
+// EnvVarScope defines where an environment variable should be made available
+type EnvVarScope string
+
+const (
+	EnvVarScopeRuntime EnvVarScope = "runtime"
+	EnvVarScopeBuild   EnvVarScope = "build"
+	EnvVarScopeAll     EnvVarScope = "all"
+)
+
+// EnvVarTargetEnv defines target runtime deployment environment
+type EnvVarTargetEnv string
+
+const (
+	EnvVarTargetEnvAll         EnvVarTargetEnv = "all"
+	EnvVarTargetEnvProduction  EnvVarTargetEnv = "production"
+	EnvVarTargetEnvStaging     EnvVarTargetEnv = "staging"
+	EnvVarTargetEnvPreview     EnvVarTargetEnv = "preview"
+	EnvVarTargetEnvDevelopment EnvVarTargetEnv = "development"
+)
+
 // EnvironmentVariable represents a configuration key-value pair scoped to a service or project
 type EnvironmentVariable struct {
-	ID             string    `json:"id"`
-	OrganizationID string    `json:"organization_id"`
-	ProjectID      *string   `json:"project_id,omitempty"`
-	ServiceID      *string   `json:"service_id,omitempty"`
-	Key            string    `json:"key"`
-	Value          string    `json:"value"`
-	IsSecret       bool      `json:"is_secret"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	ID             string          `json:"id"`
+	OrganizationID string          `json:"organization_id"`
+	ProjectID      *string         `json:"project_id,omitempty"`
+	ServiceID      *string         `json:"service_id,omitempty"`
+	Key            string          `json:"key"`
+	Value          string          `json:"value"`
+	IsSecret       bool            `json:"is_secret"`
+	Scope          EnvVarScope     `json:"scope"`
+	TargetEnv      EnvVarTargetEnv `json:"target_env"`
+	VaultPath      string          `json:"vault_path,omitempty"`
+	CreatedAt      time.Time       `json:"created_at"`
+	UpdatedAt      time.Time       `json:"updated_at"`
+}
+
+// DeploymentEnvSnapshot represents an immutable configuration release captured for a deployment
+type DeploymentEnvSnapshot struct {
+	ID                string            `json:"id"`
+	DeploymentID      string            `json:"deployment_id"`
+	ServiceID         string            `json:"service_id"`
+	ConfigReleaseNum  int               `json:"config_release_num"`
+	Variables         map[string]string `json:"variables"`
+	SecretKeys        []string          `json:"secret_keys"`
+	VaultSnapshotPath string            `json:"vault_snapshot_path,omitempty"`
+	TargetEnv         EnvVarTargetEnv   `json:"target_env"`
+	CreatedAt         time.Time         `json:"created_at"`
 }
 
 

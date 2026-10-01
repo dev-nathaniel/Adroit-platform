@@ -48,6 +48,8 @@ type Repository interface {
 	SetProjectEnvVars(ctx context.Context, orgID, projectID string, vars []EnvVarItem) error
 	GetProjectEnvVars(ctx context.Context, projectID string) ([]types.EnvironmentVariable, error)
 	DeleteProjectEnvVar(ctx context.Context, projectID, key string) error
+
+	GetEnvVarByKey(ctx context.Context, serviceID *string, projectID *string, key string) (*types.EnvironmentVariable, error)
 }
 
 // PostgresRepository implements Repository using PostgreSQL
@@ -537,15 +539,28 @@ func (r *PostgresRepository) SetServiceEnvVars(ctx context.Context, orgID, servi
 	defer tx.Rollback()
 
 	query := `
-		INSERT INTO environment_variables (id, organization_id, service_id, key, value, is_secret, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		INSERT INTO environment_variables (id, organization_id, service_id, key, value, is_secret, scope, target_env, vault_path, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 		ON CONFLICT (service_id, key) WHERE service_id IS NOT NULL
-		DO UPDATE SET value = EXCLUDED.value, is_secret = EXCLUDED.is_secret, updated_at = EXCLUDED.updated_at
+		DO UPDATE SET value = EXCLUDED.value, is_secret = EXCLUDED.is_secret, scope = EXCLUDED.scope, target_env = EXCLUDED.target_env, vault_path = EXCLUDED.vault_path, updated_at = EXCLUDED.updated_at
 	`
 	now := time.Now().UTC()
 	for _, v := range vars {
 		id := uuid.New().String()
-		if _, err := tx.ExecContext(ctx, query, id, orgID, serviceID, v.Key, v.Value, v.IsSecret, now, now); err != nil {
+		scope := string(v.Scope)
+		if scope == "" {
+			scope = string(types.EnvVarScopeAll)
+		}
+		targetEnv := string(v.TargetEnv)
+		if targetEnv == "" {
+			targetEnv = string(types.EnvVarTargetEnvAll)
+		}
+		var vaultPath sql.NullString
+		if v.VaultPath != "" {
+			vaultPath = sql.NullString{String: v.VaultPath, Valid: true}
+		}
+
+		if _, err := tx.ExecContext(ctx, query, id, orgID, serviceID, v.Key, v.Value, v.IsSecret, scope, targetEnv, vaultPath, now, now); err != nil {
 			return fmt.Errorf("failed to upsert service env var %s: %w", v.Key, err)
 		}
 	}
@@ -556,7 +571,7 @@ func (r *PostgresRepository) SetServiceEnvVars(ctx context.Context, orgID, servi
 // GetServiceEnvVars returns all environment variables explicitly attached to a service
 func (r *PostgresRepository) GetServiceEnvVars(ctx context.Context, serviceID string) ([]types.EnvironmentVariable, error) {
 	query := `
-		SELECT id, organization_id, project_id, service_id, key, value, is_secret, created_at, updated_at
+		SELECT id, organization_id, project_id, service_id, key, value, is_secret, scope, target_env, vault_path, created_at, updated_at
 		FROM environment_variables
 		WHERE service_id = $1
 		ORDER BY key ASC
@@ -570,8 +585,9 @@ func (r *PostgresRepository) GetServiceEnvVars(ctx context.Context, serviceID st
 	var vars []types.EnvironmentVariable
 	for rows.Next() {
 		var ev types.EnvironmentVariable
-		var pID, sID sql.NullString
-		if err := rows.Scan(&ev.ID, &ev.OrganizationID, &pID, &sID, &ev.Key, &ev.Value, &ev.IsSecret, &ev.CreatedAt, &ev.UpdatedAt); err != nil {
+		var pID, sID, vPath sql.NullString
+		var scope, targetEnv sql.NullString
+		if err := rows.Scan(&ev.ID, &ev.OrganizationID, &pID, &sID, &ev.Key, &ev.Value, &ev.IsSecret, &scope, &targetEnv, &vPath, &ev.CreatedAt, &ev.UpdatedAt); err != nil {
 			return nil, err
 		}
 		if pID.Valid {
@@ -581,6 +597,19 @@ func (r *PostgresRepository) GetServiceEnvVars(ctx context.Context, serviceID st
 		if sID.Valid {
 			sid := sID.String
 			ev.ServiceID = &sid
+		}
+		if vPath.Valid {
+			ev.VaultPath = vPath.String
+		}
+		if scope.Valid && scope.String != "" {
+			ev.Scope = types.EnvVarScope(scope.String)
+		} else {
+			ev.Scope = types.EnvVarScopeAll
+		}
+		if targetEnv.Valid && targetEnv.String != "" {
+			ev.TargetEnv = types.EnvVarTargetEnv(targetEnv.String)
+		} else {
+			ev.TargetEnv = types.EnvVarTargetEnvAll
 		}
 		vars = append(vars, ev)
 	}
@@ -613,15 +642,28 @@ func (r *PostgresRepository) SetProjectEnvVars(ctx context.Context, orgID, proje
 	defer tx.Rollback()
 
 	query := `
-		INSERT INTO environment_variables (id, organization_id, project_id, key, value, is_secret, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		INSERT INTO environment_variables (id, organization_id, project_id, key, value, is_secret, scope, target_env, vault_path, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 		ON CONFLICT (project_id, key) WHERE project_id IS NOT NULL
-		DO UPDATE SET value = EXCLUDED.value, is_secret = EXCLUDED.is_secret, updated_at = EXCLUDED.updated_at
+		DO UPDATE SET value = EXCLUDED.value, is_secret = EXCLUDED.is_secret, scope = EXCLUDED.scope, target_env = EXCLUDED.target_env, vault_path = EXCLUDED.vault_path, updated_at = EXCLUDED.updated_at
 	`
 	now := time.Now().UTC()
 	for _, v := range vars {
 		id := uuid.New().String()
-		if _, err := tx.ExecContext(ctx, query, id, orgID, projectID, v.Key, v.Value, v.IsSecret, now, now); err != nil {
+		scope := string(v.Scope)
+		if scope == "" {
+			scope = string(types.EnvVarScopeAll)
+		}
+		targetEnv := string(v.TargetEnv)
+		if targetEnv == "" {
+			targetEnv = string(types.EnvVarTargetEnvAll)
+		}
+		var vaultPath sql.NullString
+		if v.VaultPath != "" {
+			vaultPath = sql.NullString{String: v.VaultPath, Valid: true}
+		}
+
+		if _, err := tx.ExecContext(ctx, query, id, orgID, projectID, v.Key, v.Value, v.IsSecret, scope, targetEnv, vaultPath, now, now); err != nil {
 			return fmt.Errorf("failed to upsert project env var %s: %w", v.Key, err)
 		}
 	}
@@ -632,7 +674,7 @@ func (r *PostgresRepository) SetProjectEnvVars(ctx context.Context, orgID, proje
 // GetProjectEnvVars returns all environment variables attached to a project
 func (r *PostgresRepository) GetProjectEnvVars(ctx context.Context, projectID string) ([]types.EnvironmentVariable, error) {
 	query := `
-		SELECT id, organization_id, project_id, service_id, key, value, is_secret, created_at, updated_at
+		SELECT id, organization_id, project_id, service_id, key, value, is_secret, scope, target_env, vault_path, created_at, updated_at
 		FROM environment_variables
 		WHERE project_id = $1
 		ORDER BY key ASC
@@ -646,8 +688,9 @@ func (r *PostgresRepository) GetProjectEnvVars(ctx context.Context, projectID st
 	var vars []types.EnvironmentVariable
 	for rows.Next() {
 		var ev types.EnvironmentVariable
-		var pID, sID sql.NullString
-		if err := rows.Scan(&ev.ID, &ev.OrganizationID, &pID, &sID, &ev.Key, &ev.Value, &ev.IsSecret, &ev.CreatedAt, &ev.UpdatedAt); err != nil {
+		var pID, sID, vPath sql.NullString
+		var scope, targetEnv sql.NullString
+		if err := rows.Scan(&ev.ID, &ev.OrganizationID, &pID, &sID, &ev.Key, &ev.Value, &ev.IsSecret, &scope, &targetEnv, &vPath, &ev.CreatedAt, &ev.UpdatedAt); err != nil {
 			return nil, err
 		}
 		if pID.Valid {
@@ -657,6 +700,19 @@ func (r *PostgresRepository) GetProjectEnvVars(ctx context.Context, projectID st
 		if sID.Valid {
 			sid := sID.String
 			ev.ServiceID = &sid
+		}
+		if vPath.Valid {
+			ev.VaultPath = vPath.String
+		}
+		if scope.Valid && scope.String != "" {
+			ev.Scope = types.EnvVarScope(scope.String)
+		} else {
+			ev.Scope = types.EnvVarScopeAll
+		}
+		if targetEnv.Valid && targetEnv.String != "" {
+			ev.TargetEnv = types.EnvVarTargetEnv(targetEnv.String)
+		} else {
+			ev.TargetEnv = types.EnvVarTargetEnvAll
 		}
 		vars = append(vars, ev)
 	}
@@ -679,3 +735,62 @@ func (r *PostgresRepository) DeleteProjectEnvVar(ctx context.Context, projectID,
 	}
 	return nil
 }
+
+// GetEnvVarByKey retrieves an environment variable by key for a specific service or project
+func (r *PostgresRepository) GetEnvVarByKey(ctx context.Context, serviceID *string, projectID *string, key string) (*types.EnvironmentVariable, error) {
+	var query string
+	var targetID string
+	if serviceID != nil && *serviceID != "" {
+		query = `
+			SELECT id, organization_id, project_id, service_id, key, value, is_secret, scope, target_env, vault_path, created_at, updated_at
+			FROM environment_variables
+			WHERE service_id = $1 AND key = $2
+		`
+		targetID = *serviceID
+	} else if projectID != nil && *projectID != "" {
+		query = `
+			SELECT id, organization_id, project_id, service_id, key, value, is_secret, scope, target_env, vault_path, created_at, updated_at
+			FROM environment_variables
+			WHERE project_id = $1 AND key = $2
+		`
+		targetID = *projectID
+	} else {
+		return nil, ErrInvalidRequest
+	}
+
+	var ev types.EnvironmentVariable
+	var pID, sID, vPath, scope, targetEnv sql.NullString
+	err := r.db.QueryRowContext(ctx, query, targetID, key).Scan(
+		&ev.ID, &ev.OrganizationID, &pID, &sID, &ev.Key, &ev.Value, &ev.IsSecret, &scope, &targetEnv, &vPath, &ev.CreatedAt, &ev.UpdatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("failed to query env var by key: %w", err)
+	}
+
+	if pID.Valid {
+		pid := pID.String
+		ev.ProjectID = &pid
+	}
+	if sID.Valid {
+		sid := sID.String
+		ev.ServiceID = &sid
+	}
+	if vPath.Valid {
+		ev.VaultPath = vPath.String
+	}
+	if scope.Valid && scope.String != "" {
+		ev.Scope = types.EnvVarScope(scope.String)
+	} else {
+		ev.Scope = types.EnvVarScopeAll
+	}
+	if targetEnv.Valid && targetEnv.String != "" {
+		ev.TargetEnv = types.EnvVarTargetEnv(targetEnv.String)
+	} else {
+		ev.TargetEnv = types.EnvVarTargetEnvAll
+	}
+	return &ev, nil
+}
+

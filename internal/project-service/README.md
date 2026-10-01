@@ -35,6 +35,8 @@ Key capabilities:
 | `DB_PASSWORD`| String | `adroit_secret` | PostgreSQL password |
 | `DB_NAME` | String | `adroit_db` | PostgreSQL database name |
 | `NATS_URL` | String | `nats://localhost:4222` | NATS JetStream server address |
+| `VAULT_ADDR` | String | `http://127.0.0.1:8200` | HashiCorp Vault server address |
+| `VAULT_TOKEN` | String | `adroit-dev-root-token` | HashiCorp Vault authentication token |
 
 ---
 
@@ -82,9 +84,10 @@ All routes (except `/healthz`) require a valid Bearer JWT token in the `Authoriz
 | `DELETE` | `/api/v1/projects/{id}` | Bearer JWT | Delete project (attached services become standalone) |
 | `GET` | `/api/v1/projects/{id}/services` | Bearer JWT | List all services inside a project |
 | `POST` | `/api/v1/projects/{id}/services` | Bearer JWT | Create a service directly in a project |
-| `GET` | `/api/v1/projects/{id}/env` | Bearer JWT | List project-level environment variables |
-| `POST` | `/api/v1/projects/{id}/env` | Bearer JWT | Upsert project-level environment variables |
+| `GET` | `/api/v1/projects/{id}/env` | Bearer JWT | List project-level environment variables (secrets masked as `••••••••`) |
+| `POST` | `/api/v1/projects/{id}/env` | Bearer JWT | Upsert project-level environment variables (secrets written to Vault) |
 | `DELETE` | `/api/v1/projects/{id}/env/{key}` | Bearer JWT | Delete a project-level environment variable |
+| `POST` | `/api/v1/projects/{id}/env/{key}/reveal` | Bearer JWT | Reveal unmasked project secret from HashiCorp Vault (audit-logged) |
 
 ### 5.2 Service Endpoints (Standalone & In-Project)
 
@@ -96,9 +99,10 @@ All routes (except `/healthz`) require a valid Bearer JWT token in the `Authoriz
 | `PATCH` | `/api/v1/services/{id}` | Bearer JWT | Update service configuration (specs, commands, resources) |
 | `POST` | `/api/v1/services/{id}/move` | Bearer JWT | Move service to target project or detach to standalone (`{"project_id": null}`) |
 | `DELETE` | `/api/v1/services/{id}` | Bearer JWT | Delete service |
-| `GET` | `/api/v1/services/{id}/env` | Bearer JWT | List service env vars (or `?resolved=true` for project+service merged view) |
-| `POST` | `/api/v1/services/{id}/env` | Bearer JWT | Upsert service-level environment variables |
+| `GET` | `/api/v1/services/{id}/env` | Bearer JWT | List service env vars (or `?resolved=true` for project+service merged view; secrets masked) |
+| `POST` | `/api/v1/services/{id}/env` | Bearer JWT | Upsert service-level environment variables (secrets written to Vault) |
 | `DELETE` | `/api/v1/services/{id}/env/{key}` | Bearer JWT | Delete a service-level environment variable |
+| `POST` | `/api/v1/services/{id}/env/{key}/reveal` | Bearer JWT | Reveal unmasked service secret from HashiCorp Vault (audit-logged) |
 
 ---
 
@@ -111,3 +115,15 @@ All routes (except `/healthz`) require a valid Bearer JWT token in the `Authoriz
 * `adroit.service.updated`: Emitted when a service is updated.
 * `adroit.service.deleted`: Emitted when a service is deleted.
 * `adroit.service.moved`: Emitted when a service is moved to another project or detached to standalone.
+* `adroit.env.updated`: Emitted whenever project or service environment variables/secrets change.
+
+---
+
+## 7. HashiCorp Vault Secrets Storage & Scoping
+
+* **Vault KV v2 Paths:** Service secrets are stored at `adroit/{orgID}/services/{serviceID}`. Project secrets are stored at `adroit/{orgID}/projects/{projectID}`.
+* **Database Sentinel:** The PostgreSQL table `environment_variables` stores `value = "[vault:secret]"` for all secrets.
+* **Variable Scoping (`scope`):** Supports `runtime` (default for secrets), `build`, and `all`. BuildKit only accesses variables where `scope IN ('build', 'all')`, ensuring runtime secrets are never baked into container image layers.
+* **Target Environments (`target_env`):** Supports `all`, `production`, `staging`, `preview`, `development`.
+* **Offline Resiliency:** When Vault is unreachable during local development, the service falls back gracefully to `SimulatedSecretStore`.
+

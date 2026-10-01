@@ -42,6 +42,7 @@ const (
 	SubjectServiceDeleted        = "adroit.service.deleted"
 	SubjectServiceMoved          = "adroit.service.moved"
 	SubjectServiceScaleRequested = "adroit.service.scale_requested"
+	SubjectEnvVarsUpdated        = "adroit.env_vars.updated"
 
 	// Organization & User events
 	SubjectOrgMemberInvited = "adroit.org.member_invited"
@@ -343,6 +344,16 @@ type LogIngestedPayload struct {
 	Stream       string    `json:"stream"`
 	Message      string    `json:"message"`
 	Timestamp    time.Time `json:"timestamp"`
+}
+
+// EnvVarsUpdatedPayload is emitted when environment variables or secrets are configured or mutated
+type EnvVarsUpdatedPayload struct {
+	OrganizationID string   `json:"organization_id"`
+	ProjectID      *string  `json:"project_id,omitempty"`
+	ServiceID      *string  `json:"service_id,omitempty"`
+	UpdatedKeys    []string `json:"updated_keys"`
+	Action         string   `json:"action"` // "set", "delete"
+	TargetEnv      string   `json:"target_env,omitempty"`
 }
 
 

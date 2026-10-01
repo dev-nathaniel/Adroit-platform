@@ -77,9 +77,12 @@ type MoveServiceRequest struct {
 
 // EnvVarItem represents a single environment variable to insert or update
 type EnvVarItem struct {
-	Key      string `json:"key"`
-	Value    string `json:"value"`
-	IsSecret bool   `json:"is_secret"`
+	Key       string                `json:"key"`
+	Value     string                `json:"value"`
+	IsSecret  bool                  `json:"is_secret"`
+	Scope     types.EnvVarScope     `json:"scope,omitempty"`
+	TargetEnv types.EnvVarTargetEnv `json:"target_env,omitempty"`
+	VaultPath string                `json:"vault_path,omitempty"`
 }
 
 // SetEnvVarsRequest holds a batch of environment variables to upsert
@@ -90,4 +93,11 @@ type SetEnvVarsRequest struct {
 // ResolvedEnvResponse holds merged environment variables for runtime execution
 type ResolvedEnvResponse struct {
 	Variables map[string]string `json:"variables"`
+}
+
+// RevealSecretResponse returns an unmasked secret value for authorized users
+type RevealSecretResponse struct {
+	Key       string `json:"key"`
+	Value     string `json:"value"`
+	VaultPath string `json:"vault_path,omitempty"`
 }

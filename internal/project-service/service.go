@@ -11,6 +11,7 @@ import (
 
 	"github.com/dev-nathaniel/Adroit-platform/pkg/events"
 	"github.com/dev-nathaniel/Adroit-platform/pkg/types"
+	"github.com/dev-nathaniel/Adroit-platform/pkg/vault"
 )
 
 var (
@@ -28,17 +29,26 @@ func WithPublisher(pub events.Publisher) Option {
 	}
 }
 
+// WithSecretStore sets the Vault secret store for the service
+func WithSecretStore(store vault.SecretStore) Option {
+	return func(s *Service) {
+		s.secretStore = store
+	}
+}
+
 // Service contains core business logic for projects, services, and environment variables
 type Service struct {
-	repo      Repository
-	publisher events.Publisher
+	repo        Repository
+	publisher   events.Publisher
+	secretStore vault.SecretStore
 }
 
 // NewService creates a new project-service business engine
 func NewService(repo Repository, opts ...Option) *Service {
 	s := &Service{
-		repo:      repo,
-		publisher: events.NewNoopPublisher(),
+		repo:        repo,
+		publisher:   events.NewNoopPublisher(),
+		secretStore: vault.NewSimulatedSecretStore(),
 	}
 	for _, opt := range opts {
 		opt(s)
@@ -572,7 +582,7 @@ func (s *Service) DeleteService(ctx context.Context, userID, serviceID string) e
 // ENVIRONMENT VARIABLES
 // ============================================================================
 
-// SetServiceEnvVars upserts service environment variables
+// SetServiceEnvVars upserts service environment variables and stores secrets in Vault
 func (s *Service) SetServiceEnvVars(ctx context.Context, userID, serviceID string, vars []EnvVarItem) error {
 	svc, err := s.repo.GetServiceByID(ctx, serviceID)
 	if err != nil {
@@ -582,17 +592,62 @@ func (s *Service) SetServiceEnvVars(ctx context.Context, userID, serviceID strin
 		return err
 	}
 
-	for _, v := range vars {
-		cleanKey := strings.TrimSpace(v.Key)
+	secretsToStore := make(map[string]string)
+	var keysUpdated []string
+	cleanVars := make([]EnvVarItem, len(vars))
+	copy(cleanVars, vars)
+
+	for i := range cleanVars {
+		cleanKey := strings.TrimSpace(cleanVars[i].Key)
 		if !validEnvKeyRegex.MatchString(cleanKey) {
 			return fmt.Errorf("%w: invalid environment variable key '%s'", ErrInvalidRequest, cleanKey)
 		}
+		cleanVars[i].Key = cleanKey
+		keysUpdated = append(keysUpdated, cleanKey)
+
+		if cleanVars[i].Scope == "" {
+			cleanVars[i].Scope = types.EnvVarScopeAll
+		}
+		if cleanVars[i].TargetEnv == "" {
+			cleanVars[i].TargetEnv = types.EnvVarTargetEnvAll
+		}
+
+		if cleanVars[i].IsSecret {
+			secretsToStore[cleanKey] = cleanVars[i].Value
+			cleanVars[i].VaultPath = s.secretStore.VaultPath(svc.OrganizationID, vault.ScopeService, serviceID)
+			cleanVars[i].Value = "[vault:secret]"
+		}
 	}
 
-	return s.repo.SetServiceEnvVars(ctx, svc.OrganizationID, serviceID, vars)
+	// 1. Store secrets securely in Vault
+	if len(secretsToStore) > 0 {
+		if err := s.secretStore.PutSecrets(ctx, svc.OrganizationID, vault.ScopeService, serviceID, secretsToStore); err != nil {
+			return fmt.Errorf("failed to store secrets in vault: %w", err)
+		}
+	}
+
+	// 2. Persist metadata & non-secret values in PostgreSQL
+	if err := s.repo.SetServiceEnvVars(ctx, svc.OrganizationID, serviceID, cleanVars); err != nil {
+		return err
+	}
+
+	// 3. Publish domain event
+	_ = s.publisher.Publish(ctx, events.SubjectEnvVarsUpdated, events.New(
+		events.SubjectEnvVarsUpdated,
+		"project-service",
+		events.EnvVarsUpdatedPayload{
+			OrganizationID: svc.OrganizationID,
+			ProjectID:      svc.ProjectID,
+			ServiceID:      &serviceID,
+			UpdatedKeys:    keysUpdated,
+			Action:         "set",
+		},
+	))
+
+	return nil
 }
 
-// GetServiceEnvVars returns service environment variables
+// GetServiceEnvVars returns service environment variables with secrets masked
 func (s *Service) GetServiceEnvVars(ctx context.Context, userID, serviceID string) ([]types.EnvironmentVariable, error) {
 	svc, err := s.repo.GetServiceByID(ctx, serviceID)
 	if err != nil {
@@ -601,10 +656,58 @@ func (s *Service) GetServiceEnvVars(ctx context.Context, userID, serviceID strin
 	if _, err := s.repo.CheckOrgMembership(ctx, svc.OrganizationID, userID); err != nil {
 		return nil, err
 	}
-	return s.repo.GetServiceEnvVars(ctx, serviceID)
+
+	vars, err := s.repo.GetServiceEnvVars(ctx, serviceID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Mask secret values in API response
+	for i := range vars {
+		if vars[i].IsSecret {
+			vars[i].Value = "••••••••"
+		}
+	}
+
+	return vars, nil
 }
 
-// DeleteServiceEnvVar removes an environment variable from a service
+// RevealServiceSecret returns the unmasked value of a secret stored in Vault for authorized members
+func (s *Service) RevealServiceSecret(ctx context.Context, userID, serviceID, key string) (*RevealSecretResponse, error) {
+	svc, err := s.repo.GetServiceByID(ctx, serviceID)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := s.repo.CheckOrgMembership(ctx, svc.OrganizationID, userID); err != nil {
+		return nil, err
+	}
+
+	ev, err := s.repo.GetEnvVarByKey(ctx, &serviceID, nil, key)
+	if err != nil {
+		return nil, err
+	}
+
+	if !ev.IsSecret {
+		return &RevealSecretResponse{
+			Key:       ev.Key,
+			Value:     ev.Value,
+			VaultPath: "",
+		}, nil
+	}
+
+	rawVal, err := s.secretStore.GetSecretKey(ctx, svc.OrganizationID, vault.ScopeService, serviceID, key)
+	if err != nil {
+		return nil, fmt.Errorf("failed to retrieve secret from vault: %w", err)
+	}
+
+	return &RevealSecretResponse{
+		Key:       key,
+		Value:     rawVal,
+		VaultPath: ev.VaultPath,
+	}, nil
+}
+
+// DeleteServiceEnvVar removes an environment variable from a service and Vault
 func (s *Service) DeleteServiceEnvVar(ctx context.Context, userID, serviceID, key string) error {
 	svc, err := s.repo.GetServiceByID(ctx, serviceID)
 	if err != nil {
@@ -613,10 +716,31 @@ func (s *Service) DeleteServiceEnvVar(ctx context.Context, userID, serviceID, ke
 	if _, err := s.repo.CheckOrgMembership(ctx, svc.OrganizationID, userID); err != nil {
 		return err
 	}
-	return s.repo.DeleteServiceEnvVar(ctx, serviceID, key)
+
+	if err := s.repo.DeleteServiceEnvVar(ctx, serviceID, key); err != nil {
+		return err
+	}
+
+	// Remove from Vault
+	_ = s.secretStore.DeleteSecretKey(ctx, svc.OrganizationID, vault.ScopeService, serviceID, key)
+
+	// Publish domain event
+	_ = s.publisher.Publish(ctx, events.SubjectEnvVarsUpdated, events.New(
+		events.SubjectEnvVarsUpdated,
+		"project-service",
+		events.EnvVarsUpdatedPayload{
+			OrganizationID: svc.OrganizationID,
+			ProjectID:      svc.ProjectID,
+			ServiceID:      &serviceID,
+			UpdatedKeys:    []string{key},
+			Action:         "delete",
+		},
+	))
+
+	return nil
 }
 
-// SetProjectEnvVars upserts project environment variables
+// SetProjectEnvVars upserts project environment variables and stores secrets in Vault
 func (s *Service) SetProjectEnvVars(ctx context.Context, userID, projectID string, vars []EnvVarItem) error {
 	proj, err := s.repo.GetProjectByID(ctx, projectID)
 	if err != nil {
@@ -626,17 +750,59 @@ func (s *Service) SetProjectEnvVars(ctx context.Context, userID, projectID strin
 		return err
 	}
 
-	for _, v := range vars {
-		cleanKey := strings.TrimSpace(v.Key)
+	secretsToStore := make(map[string]string)
+	var keysUpdated []string
+	cleanVars := make([]EnvVarItem, len(vars))
+	copy(cleanVars, vars)
+
+	for i := range cleanVars {
+		cleanKey := strings.TrimSpace(cleanVars[i].Key)
 		if !validEnvKeyRegex.MatchString(cleanKey) {
 			return fmt.Errorf("%w: invalid environment variable key '%s'", ErrInvalidRequest, cleanKey)
 		}
+		cleanVars[i].Key = cleanKey
+		keysUpdated = append(keysUpdated, cleanKey)
+
+		if cleanVars[i].Scope == "" {
+			cleanVars[i].Scope = types.EnvVarScopeAll
+		}
+		if cleanVars[i].TargetEnv == "" {
+			cleanVars[i].TargetEnv = types.EnvVarTargetEnvAll
+		}
+
+		if cleanVars[i].IsSecret {
+			secretsToStore[cleanKey] = cleanVars[i].Value
+			cleanVars[i].VaultPath = s.secretStore.VaultPath(proj.OrganizationID, vault.ScopeProject, projectID)
+			cleanVars[i].Value = "[vault:secret]"
+		}
 	}
 
-	return s.repo.SetProjectEnvVars(ctx, proj.OrganizationID, projectID, vars)
+	if len(secretsToStore) > 0 {
+		if err := s.secretStore.PutSecrets(ctx, proj.OrganizationID, vault.ScopeProject, projectID, secretsToStore); err != nil {
+			return fmt.Errorf("failed to store secrets in vault: %w", err)
+		}
+	}
+
+	if err := s.repo.SetProjectEnvVars(ctx, proj.OrganizationID, projectID, cleanVars); err != nil {
+		return err
+	}
+
+	_ = s.publisher.Publish(ctx, events.SubjectEnvVarsUpdated, events.New(
+		events.SubjectEnvVarsUpdated,
+		"project-service",
+		events.EnvVarsUpdatedPayload{
+			OrganizationID: proj.OrganizationID,
+			ProjectID:      &projectID,
+			ServiceID:      nil,
+			UpdatedKeys:    keysUpdated,
+			Action:         "set",
+		},
+	))
+
+	return nil
 }
 
-// GetProjectEnvVars returns project environment variables
+// GetProjectEnvVars returns project environment variables with secrets masked
 func (s *Service) GetProjectEnvVars(ctx context.Context, userID, projectID string) ([]types.EnvironmentVariable, error) {
 	proj, err := s.repo.GetProjectByID(ctx, projectID)
 	if err != nil {
@@ -645,10 +811,57 @@ func (s *Service) GetProjectEnvVars(ctx context.Context, userID, projectID strin
 	if _, err := s.repo.CheckOrgMembership(ctx, proj.OrganizationID, userID); err != nil {
 		return nil, err
 	}
-	return s.repo.GetProjectEnvVars(ctx, projectID)
+
+	vars, err := s.repo.GetProjectEnvVars(ctx, projectID)
+	if err != nil {
+		return nil, err
+	}
+
+	for i := range vars {
+		if vars[i].IsSecret {
+			vars[i].Value = "••••••••"
+		}
+	}
+
+	return vars, nil
 }
 
-// DeleteProjectEnvVar removes an environment variable from a project
+// RevealProjectSecret returns the unmasked value of a project secret from Vault
+func (s *Service) RevealProjectSecret(ctx context.Context, userID, projectID, key string) (*RevealSecretResponse, error) {
+	proj, err := s.repo.GetProjectByID(ctx, projectID)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := s.repo.CheckOrgMembership(ctx, proj.OrganizationID, userID); err != nil {
+		return nil, err
+	}
+
+	ev, err := s.repo.GetEnvVarByKey(ctx, nil, &projectID, key)
+	if err != nil {
+		return nil, err
+	}
+
+	if !ev.IsSecret {
+		return &RevealSecretResponse{
+			Key:       ev.Key,
+			Value:     ev.Value,
+			VaultPath: "",
+		}, nil
+	}
+
+	rawVal, err := s.secretStore.GetSecretKey(ctx, proj.OrganizationID, vault.ScopeProject, projectID, key)
+	if err != nil {
+		return nil, fmt.Errorf("failed to retrieve secret from vault: %w", err)
+	}
+
+	return &RevealSecretResponse{
+		Key:       key,
+		Value:     rawVal,
+		VaultPath: ev.VaultPath,
+	}, nil
+}
+
+// DeleteProjectEnvVar removes an environment variable from a project and Vault
 func (s *Service) DeleteProjectEnvVar(ctx context.Context, userID, projectID, key string) error {
 	proj, err := s.repo.GetProjectByID(ctx, projectID)
 	if err != nil {
@@ -657,10 +870,29 @@ func (s *Service) DeleteProjectEnvVar(ctx context.Context, userID, projectID, ke
 	if _, err := s.repo.CheckOrgMembership(ctx, proj.OrganizationID, userID); err != nil {
 		return err
 	}
-	return s.repo.DeleteProjectEnvVar(ctx, projectID, key)
+
+	if err := s.repo.DeleteProjectEnvVar(ctx, projectID, key); err != nil {
+		return err
+	}
+
+	_ = s.secretStore.DeleteSecretKey(ctx, proj.OrganizationID, vault.ScopeProject, projectID, key)
+
+	_ = s.publisher.Publish(ctx, events.SubjectEnvVarsUpdated, events.New(
+		events.SubjectEnvVarsUpdated,
+		"project-service",
+		events.EnvVarsUpdatedPayload{
+			OrganizationID: proj.OrganizationID,
+			ProjectID:      &projectID,
+			ServiceID:      nil,
+			UpdatedKeys:    []string{key},
+			Action:         "delete",
+		},
+	))
+
+	return nil
 }
 
-// GetResolvedServiceEnv returns combined environment variables (project vars merged with service vars overriding)
+// GetResolvedServiceEnv returns unmasked runtime environment variables (project merged with service overriding, secrets read from Vault)
 func (s *Service) GetResolvedServiceEnv(ctx context.Context, userID, serviceID string) (map[string]string, error) {
 	svc, err := s.repo.GetServiceByID(ctx, serviceID)
 	if err != nil {
@@ -672,24 +904,43 @@ func (s *Service) GetResolvedServiceEnv(ctx context.Context, userID, serviceID s
 
 	result := make(map[string]string)
 
-	// If in project, load project vars first
+	// 1. Load project variables if in a project
 	if svc.ProjectID != nil && *svc.ProjectID != "" {
 		pVars, err := s.repo.GetProjectEnvVars(ctx, *svc.ProjectID)
-		if err != nil {
-			return nil, err
-		}
-		for _, pv := range pVars {
-			result[pv.Key] = pv.Value
+		if err == nil {
+			var projectVaultSecrets map[string]string
+			for _, pv := range pVars {
+				if pv.IsSecret {
+					if projectVaultSecrets == nil {
+						projectVaultSecrets, _ = s.secretStore.GetSecrets(ctx, svc.OrganizationID, vault.ScopeProject, *svc.ProjectID)
+					}
+					if secretVal, ok := projectVaultSecrets[pv.Key]; ok {
+						result[pv.Key] = secretVal
+					}
+				} else {
+					result[pv.Key] = pv.Value
+				}
+			}
 		}
 	}
 
-	// Service vars override project vars
+	// 2. Load service variables (service overrides project)
 	sVars, err := s.repo.GetServiceEnvVars(ctx, serviceID)
 	if err != nil {
 		return nil, err
 	}
+	var serviceVaultSecrets map[string]string
 	for _, sv := range sVars {
-		result[sv.Key] = sv.Value
+		if sv.IsSecret {
+			if serviceVaultSecrets == nil {
+				serviceVaultSecrets, _ = s.secretStore.GetSecrets(ctx, svc.OrganizationID, vault.ScopeService, serviceID)
+			}
+			if secretVal, ok := serviceVaultSecrets[sv.Key]; ok {
+				result[sv.Key] = secretVal
+			}
+		} else {
+			result[sv.Key] = sv.Value
+		}
 	}
 
 	return result, nil
