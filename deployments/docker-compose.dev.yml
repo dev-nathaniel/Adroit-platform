@@ -83,6 +83,7 @@ services:
     environment:
       VAULT_DEV_ROOT_TOKEN_ID: "root"
       VAULT_DEV_LISTEN_ADDRESS: "0.0.0.0:8200"
+      VAULT_ADDR: "http://127.0.0.1:8200"
     ports:
       - "8200:8200" # Vault HTTP API
     cap_add:
@@ -109,9 +110,32 @@ services:
       - caddy_data:/data
       - caddy_config:/config
 
+  # ============================================================================
+  # Nomad (Cluster Workload Orchestration - Server Dev Mode)
+  # ============================================================================
+  nomad:
+    image: hashicorp/nomad:1.8
+    container_name: adroit-nomad
+    restart: unless-stopped
+    command: ["agent", "-server", "-bootstrap-expect=1", "-data-dir=/nomad/data", "-bind=0.0.0.0"]
+    environment:
+      NOMAD_SKIP_DOCKER_IMAGE_WARN: "1"
+    ports:
+      - "4646:4646" # HTTP API & Web UI
+      - "4647:4647" # RPC
+      - "4648:4648" # Serf WAN
+    volumes:
+      - nomad_data:/nomad/data
+    healthcheck:
+      test: ["CMD", "nomad", "status"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
 volumes:
   postgres_data:
   redis_data:
   nats_data:
   caddy_data:
   caddy_config:
+  nomad_data:
