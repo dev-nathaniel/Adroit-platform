@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/dev-nathaniel/Adroit-platform/deployments/migrations"
+	"github.com/dev-nathaniel/Adroit-platform/pkg/config"
 	"github.com/dev-nathaniel/Adroit-platform/pkg/database"
 )
 
@@ -40,6 +41,8 @@ type ServiceDef struct {
 }
 
 func main() {
+	_ = config.LoadDotEnv()
+
 	services := []ServiceDef{
 		{
 			Name:  "Auth Service",
