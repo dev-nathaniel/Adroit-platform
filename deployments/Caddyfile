@@ -1,0 +1,10 @@
+{
+    admin 0.0.0.0:2019 {
+        origins localhost:2019 127.0.0.1:2019 0.0.0.0:2019
+    }
+    auto_https off
+}
+
+:80 {
+    respond "Adroit Platform Edge Ingress Operational" 200
+}
