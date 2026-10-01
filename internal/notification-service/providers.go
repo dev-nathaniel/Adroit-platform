@@ -13,7 +13,9 @@ import (
 	"io"
 	"log/slog"
 	"mime/multipart"
+	"net"
 	"net/http"
+	"net/mail"
 	"net/smtp"
 	"net/textproto"
 	"strings"
@@ -207,54 +209,87 @@ func (s *SMTPEmailProvider) SendEmail(ctx context.Context, msg EmailMessage) err
 	}
 	_ = writer.Close()
 
+	// Extract bare email address for SMTP envelope MAIL FROM
+	envelopeFrom := from
+	if parsed, err := mail.ParseAddress(from); err == nil {
+		envelopeFrom = parsed.Address
+	}
+
+	// Extract bare email addresses for SMTP envelope RCPT TO
+	envelopeTo := make([]string, 0, len(msg.To))
+	for _, to := range msg.To {
+		if parsed, err := mail.ParseAddress(to); err == nil {
+			envelopeTo = append(envelopeTo, parsed.Address)
+		} else {
+			envelopeTo = append(envelopeTo, strings.TrimSpace(to))
+		}
+	}
+
 	var auth smtp.Auth
 	if s.cfg.Username != "" && s.cfg.Password != "" {
 		auth = smtp.PlainAuth("", s.cfg.Username, s.cfg.Password, s.cfg.Host)
 	}
 
-	// For port 465 (SMTPS direct TLS)
+	var conn net.Conn
+	var err error
+
 	if s.cfg.Port == 465 {
 		tlsConfig := &tls.Config{
 			ServerName:         s.cfg.Host,
 			InsecureSkipVerify: s.cfg.SkipVerify,
 		}
-		conn, err := tls.Dial("tcp", addr, tlsConfig)
+		conn, err = tls.Dial("tcp", addr, tlsConfig)
 		if err != nil {
 			return fmt.Errorf("failed to dial SMTP TLS %s: %w", addr, err)
 		}
-		defer conn.Close()
-
-		c, err := smtp.NewClient(conn, s.cfg.Host)
+	} else {
+		conn, err = net.DialTimeout("tcp", addr, 10*time.Second)
 		if err != nil {
-			return fmt.Errorf("failed to create SMTP client: %w", err)
+			return fmt.Errorf("failed to connect to SMTP server %s: %w", addr, err)
 		}
-		defer c.Quit()
+	}
+	defer conn.Close()
 
-		if auth != nil {
-			if err := c.Auth(auth); err != nil {
-				return fmt.Errorf("smtp auth failed: %w", err)
+	c, err := smtp.NewClient(conn, s.cfg.Host)
+	if err != nil {
+		return fmt.Errorf("failed to create SMTP client: %w", err)
+	}
+	defer c.Quit()
+
+	if s.cfg.Port != 465 {
+		if ok, _ := c.Extension("STARTTLS"); ok {
+			tlsConfig := &tls.Config{
+				ServerName:         s.cfg.Host,
+				InsecureSkipVerify: s.cfg.SkipVerify,
+			}
+			if err := c.StartTLS(tlsConfig); err != nil {
+				return fmt.Errorf("smtp starttls failed: %w", err)
 			}
 		}
-		if err := c.Mail(from); err != nil {
-			return err
-		}
-		for _, to := range msg.To {
-			if err := c.Rcpt(to); err != nil {
-				return err
-			}
-		}
-		w, err := c.Data()
-		if err != nil {
-			return err
-		}
-		if _, err := w.Write(buf.Bytes()); err != nil {
-			return err
-		}
-		return w.Close()
 	}
 
-	// Standard STARTTLS / Plain SMTP (Port 587, 25, 2525)
-	return smtp.SendMail(addr, auth, from, msg.To, buf.Bytes())
+	if auth != nil {
+		if err := c.Auth(auth); err != nil {
+			return fmt.Errorf("smtp auth failed: %w", err)
+		}
+	}
+
+	if err := c.Mail(envelopeFrom); err != nil {
+		return fmt.Errorf("smtp MAIL FROM failed: %w", err)
+	}
+	for _, to := range envelopeTo {
+		if err := c.Rcpt(to); err != nil {
+			return fmt.Errorf("smtp RCPT TO failed: %w", err)
+		}
+	}
+	w, err := c.Data()
+	if err != nil {
+		return fmt.Errorf("smtp DATA command failed: %w", err)
+	}
+	if _, err := w.Write(buf.Bytes()); err != nil {
+		return fmt.Errorf("smtp write message failed: %w", err)
+	}
+	return w.Close()
 }
 
 // ============================================================================

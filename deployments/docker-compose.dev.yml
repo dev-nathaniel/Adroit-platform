@@ -132,6 +132,17 @@ services:
       timeout: 3s
       retries: 5
 
+  # ============================================================================
+  # Mailpit (Local Email Testing & Webmail UI)
+  # ============================================================================
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: adroit-mailpit
+    restart: unless-stopped
+    ports:
+      - "1025:1025" # SMTP port
+      - "8025:8025" # Webmail UI
+
 volumes:
   postgres_data:
   redis_data:

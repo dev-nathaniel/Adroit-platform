@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -292,5 +293,30 @@ func TestHTTPHandlers(t *testing.T) {
 
 	if recInvite.Code != http.StatusOK {
 		t.Errorf("expected 200 on /api/v1/notifications/test-invite, got %d: %s", recInvite.Code, recInvite.Body.String())
+	}
+}
+
+func TestSMTPEmailProvider(t *testing.T) {
+	conn, err := net.DialTimeout("tcp", "localhost:1025", 1*time.Second)
+	if err != nil {
+		t.Skip("Mailpit not running on localhost:1025, skipping SMTP live test")
+	}
+	conn.Close()
+
+	log := logger.New(logger.Config{Level: "debug", Format: "text"})
+	prov := NewSMTPEmailProvider(SMTPConfig{
+		Host: "localhost",
+		Port: 1025,
+		From: "Adroit Platform <no-reply@adroit.run>",
+	}, log)
+
+	err = prov.SendEmail(context.Background(), EmailMessage{
+		To:        []string{"invitee@example.com"},
+		Subject:   "Test Invitation",
+		PlainBody: "Welcome to Adroit!",
+		HTMLBody:  "<p>Welcome to <strong>Adroit</strong>!</p>",
+	})
+	if err != nil {
+		t.Fatalf("failed to send email via Mailpit: %v", err)
 	}
 }
