@@ -129,6 +129,7 @@ func (h *Handler) SendTestInvite(w http.ResponseWriter, r *http.Request) {
 		Email:            req.Email,
 		Role:             req.Role,
 		InvitedByName:    req.InvitedByName,
+		InvitedByEmail:   "admin@adroit.run",
 		InviteURL:        "/invite?token=sample_verification_token_12345",
 		ExpiresAt:        time.Now().Add(7 * 24 * time.Hour),
 	}

@@ -124,117 +124,248 @@ func (tm *TemplateManager) Render(templateName string, data map[string]any) (*Re
 // Raw Templates (HTML & Plain Text)
 // ============================================================================
 
-const orgInvitationHTML = `<!DOCTYPE html>
-<html>
+const orgInvitationHTML = `<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Organization Invitation</title>
-  <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #0b0f19; color: #f3f4f6; margin: 0; padding: 24px; }
-    .card { max-width: 580px; margin: 0 auto; background: #111827; border: 1px solid #1f2937; border-radius: 12px; overflow: hidden; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }
-    .header { background: linear-gradient(135deg, #0284c7 0%, #6366f1 100%); padding: 32px 24px; text-align: center; }
-    .header h1 { margin: 0; color: #ffffff; font-size: 24px; font-weight: 700; letter-spacing: -0.5px; }
-    .content { padding: 32px 28px; line-height: 1.6; }
-    .content p { color: #d1d5db; font-size: 15px; margin: 0 0 16px; }
-    .highlight { color: #38bdf8; font-weight: 600; }
-    .badge { display: inline-block; padding: 4px 10px; background: #1e293b; border: 1px solid #334155; border-radius: 6px; font-size: 13px; color: #a5f3fc; font-weight: 600; }
-    .cta-container { text-align: center; margin: 32px 0; }
-    .cta-btn { display: inline-block; background: #0284c7; color: #ffffff !important; text-decoration: none; padding: 14px 32px; border-radius: 8px; font-weight: 600; font-size: 16px; box-shadow: 0 4px 14px rgba(2, 132, 199, 0.4); }
-    .cta-btn:hover { background: #0369a1; }
-    .footer { border-top: 1px solid #1f2937; padding: 20px 28px; font-size: 12px; color: #6b7280; text-align: center; }
-    .link-fallback { word-break: break-all; color: #9ca3af; font-size: 12px; margin-top: 12px; }
-  </style>
+  <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Join {{ .OrganizationName }} on Adroit</title>
 </head>
-<body>
-  <div class="card">
-    <div class="header">
-      <h1>ADROIT PLATFORM</h1>
-    </div>
-    <div class="content">
-      <p>Hello,</p>
-      <p>
-        <span class="highlight">{{ if .InvitedByName }}{{ .InvitedByName }}{{ else if .InviterName }}{{ .InviterName }}{{ else }}A workspace administrator{{ end }}</span> has invited you to join 
-        <strong style="color: #ffffff;">{{ .OrganizationName }}</strong> on Adroit Platform as 
-        <span class="badge">{{ .Role }}</span>.
-      </p>
-      <p>
-        Adroit is the developer-centric cloud PaaS for automated building, isolated container & microVM execution, managed databases, and dynamic routing.
-      </p>
-      <div class="cta-container">
-        <a href="{{ .InviteURL }}" class="cta-btn" target="_blank">Accept Invitation</a>
-      </div>
-      <p style="font-size: 13px; color: #9ca3af;">
-        This invitation will expire on <strong>{{ .ExpiresAt }}</strong>. If you did not expect this invitation, you can safely ignore this email.
-      </p>
-      <div class="link-fallback">
-        If the button doesn't work, copy and paste this link into your browser:<br>
-        <a href="{{ .InviteURL }}" style="color: #38bdf8;">{{ .InviteURL }}</a>
-      </div>
-    </div>
-    <div class="footer">
-      &copy; Adroit Platform. Modern Cloud Platform-as-a-Service.
-    </div>
-  </div>
+<body style="margin: 0; padding: 0; background-color: #f8fafc; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; color: #334155;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #f8fafc; padding: 40px 16px;">
+    <tr>
+      <td align="center">
+        <!-- Main Card -->
+        <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="max-width: 540px; width: 100%; background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.04); overflow: hidden; text-align: left;">
+          
+          <!-- Header / Brand -->
+          <tr>
+            <td style="padding: 32px 36px 20px 36px;">
+              <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+                <tr>
+                  <td style="width: 28px; height: 28px; background-color: #0f172a; border-radius: 6px; text-align: center; vertical-align: middle;">
+                    <span style="font-size: 15px; font-weight: 800; color: #ffffff; line-height: 28px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">A</span>
+                  </td>
+                  <td style="padding-left: 10px; font-size: 17px; font-weight: 700; color: #0f172a; letter-spacing: -0.02em;">
+                    Adroit
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Main Content -->
+          <tr>
+            <td style="padding: 0 36px 36px 36px;">
+              <h1 style="margin: 8px 0 16px 0; font-size: 20px; font-weight: 600; color: #0f172a; letter-spacing: -0.02em; line-height: 1.3;">
+                Join {{ .OrganizationName }} on Adroit
+              </h1>
+
+              <p style="margin: 0 0 20px 0; font-size: 15px; line-height: 1.6; color: #334155;">
+                <strong style="color: #0f172a;">{{ if .InvitedByName }}{{ .InvitedByName }}{{ else if .InviterName }}{{ .InviterName }}{{ else }}A team administrator{{ end }}</strong>{{ if .InvitedByEmail }} ({{ .InvitedByEmail }}){{ end }} has invited you to join the <strong style="color: #0f172a;">{{ .OrganizationName }}</strong> organization as <span style="display: inline-block; padding: 2px 8px; font-size: 12px; font-weight: 600; color: #0284c7; background-color: #f0f9ff; border: 1px solid #bae6fd; border-radius: 4px; text-transform: lowercase;">{{ .Role }}</span>.
+              </p>
+
+              <!-- Workspace Details Panel -->
+              <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="width: 100%; margin: 20px 0 24px 0; background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; font-size: 14px;">
+                <tr>
+                  <td style="padding: 12px 16px; border-bottom: 1px solid #e2e8f0; color: #64748b; width: 30%;">Organization</td>
+                  <td style="padding: 12px 16px; border-bottom: 1px solid #e2e8f0; color: #0f172a; font-weight: 600;">{{ .OrganizationName }}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 12px 16px; border-bottom: 1px solid #e2e8f0; color: #64748b;">Assigned Role</td>
+                  <td style="padding: 12px 16px; border-bottom: 1px solid #e2e8f0; color: #0f172a; font-weight: 600;">{{ .Role }}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 12px 16px; color: #64748b;">Invited By</td>
+                  <td style="padding: 12px 16px; color: #0f172a; font-weight: 600;">{{ if .InvitedByName }}{{ .InvitedByName }}{{ else if .InviterName }}{{ .InviterName }}{{ else }}Administrator{{ end }}</td>
+                </tr>
+              </table>
+
+              <!-- Action Button -->
+              <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin: 28px 0 20px 0;">
+                <tr>
+                  <td>
+                    <a href="{{ .InviteURL }}" target="_blank" style="display: inline-block; background-color: #0284c7; color: #ffffff !important; font-size: 14px; font-weight: 600; text-decoration: none; padding: 12px 28px; border-radius: 6px; letter-spacing: -0.01em;">
+                      Accept Invitation
+                    </a>
+                  </td>
+                </tr>
+              </table>
+
+              <p style="margin: 0 0 16px 0; font-size: 13px; line-height: 1.5; color: #64748b;">
+                This invitation link will expire on {{ .ExpiresAt }}. If you were not expecting this invitation, you can safely ignore this email.
+              </p>
+
+              <!-- Link Fallback -->
+              <div style="margin-top: 24px; padding-top: 18px; border-top: 1px solid #f1f5f9;">
+                <p style="margin: 0 0 6px 0; font-size: 12px; color: #94a3b8;">
+                  If the button above does not work, copy and paste this link into your browser:
+                </p>
+                <p style="margin: 0; font-size: 12px; word-break: break-all;">
+                  <a href="{{ .InviteURL }}" style="color: #0284c7; text-decoration: underline;">{{ .InviteURL }}</a>
+                </p>
+              </div>
+            </td>
+          </tr>
+        </table>
+
+        <!-- Sub-card Footer -->
+        <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="max-width: 540px; width: 100%; margin-top: 20px; text-align: center;">
+          <tr>
+            <td style="font-size: 12px; color: #94a3b8; line-height: 1.5;">
+              Adroit Platform • Developer Cloud Infrastructure
+            </td>
+          </tr>
+        </table>
+
+      </td>
+    </tr>
+  </table>
 </body>
 </html>`
 
-const orgInvitationText = `ADROIT PLATFORM INVITATION
-=========================================
+const orgInvitationText = `Join {{ .OrganizationName }} on Adroit
+========================================
 
-Hello,
+{{ if .InvitedByName }}{{ .InvitedByName }}{{ else if .InviterName }}{{ .InviterName }}{{ else }}A team administrator{{ end }} has invited you to join {{ .OrganizationName }} on Adroit as {{ .Role }}.
 
-{{ if .InvitedByName }}{{ .InvitedByName }}{{ else if .InviterName }}{{ .InviterName }}{{ else }}A workspace administrator{{ end }} has invited you to join {{ .OrganizationName }} on Adroit Platform as {{ .Role }}.
-
-To accept this invitation and join the workspace, open the link below in your browser:
+To accept this invitation and access the workspace, open the link below in your browser:
 {{ .InviteURL }}
 
 This invitation will expire on: {{ .ExpiresAt }}.
 
-If you did not expect this invitation, you can safely ignore this email.
+If you were not expecting this invitation, you can safely ignore this email.
 
 --
-Adroit Platform Team
+Adroit Platform
 `
 
-const welcomeHTML = `<!DOCTYPE html>
-<html>
+const welcomeHTML = `<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
 <head>
-  <meta charset="utf-8">
+  <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Welcome to Adroit</title>
 </head>
-<body style="font-family: sans-serif; background: #0b0f19; color: #f3f4f6; padding: 24px;">
-  <div style="max-width: 580px; margin: 0 auto; background: #111827; padding: 32px; border-radius: 8px; border: 1px solid #1f2937;">
-    <h2 style="color: #38bdf8; margin-top: 0;">Welcome to Adroit, {{ .Name }}!</h2>
-    <p>We are thrilled to have you. Your personal developer workspace is ready to deploy containers, managed databases, and microVMs.</p>
-    <p><a href="{{ .DashboardURL }}" style="background: #0284c7; color: white; padding: 10px 20px; text-decoration: none; border-radius: 6px; display: inline-block;">Open Dashboard</a></p>
-  </div>
+<body style="margin: 0; padding: 0; background-color: #f8fafc; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; -webkit-font-smoothing: antialiased; color: #334155;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #f8fafc; padding: 40px 16px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="max-width: 540px; width: 100%; background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.04); overflow: hidden; text-align: left;">
+          <tr>
+            <td style="padding: 32px 36px 20px 36px;">
+              <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+                <tr>
+                  <td style="width: 28px; height: 28px; background-color: #0f172a; border-radius: 6px; text-align: center; vertical-align: middle;">
+                    <span style="font-size: 15px; font-weight: 800; color: #ffffff; line-height: 28px;">A</span>
+                  </td>
+                  <td style="padding-left: 10px; font-size: 17px; font-weight: 700; color: #0f172a; letter-spacing: -0.02em;">
+                    Adroit
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding: 0 36px 36px 36px;">
+              <h1 style="margin: 8px 0 16px 0; font-size: 20px; font-weight: 600; color: #0f172a; letter-spacing: -0.02em;">
+                Welcome to Adroit, {{ .Name }}
+              </h1>
+              <p style="margin: 0 0 20px 0; font-size: 15px; line-height: 1.6; color: #334155;">
+                Your developer account is active and ready. You can now build, deploy, and manage your isolated services, databases, and microVMs.
+              </p>
+              <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin: 28px 0 24px 0;">
+                <tr>
+                  <td>
+                    <a href="{{ .DashboardURL }}" target="_blank" style="display: inline-block; background-color: #0284c7; color: #ffffff !important; font-size: 14px; font-weight: 600; text-decoration: none; padding: 12px 28px; border-radius: 6px; letter-spacing: -0.01em;">
+                      Open Dashboard
+                    </a>
+                  </td>
+                </tr>
+              </table>
+              <div style="margin-top: 24px; padding-top: 18px; border-top: 1px solid #f1f5f9;">
+                <p style="margin: 0 0 6px 0; font-size: 12px; color: #94a3b8;">Direct Dashboard link:</p>
+                <p style="margin: 0; font-size: 12px; word-break: break-all;">
+                  <a href="{{ .DashboardURL }}" style="color: #0284c7; text-decoration: underline;">{{ .DashboardURL }}</a>
+                </p>
+              </div>
+            </td>
+          </tr>
+        </table>
+        <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="max-width: 540px; width: 100%; margin-top: 20px; text-align: center;">
+          <tr>
+            <td style="font-size: 12px; color: #94a3b8; line-height: 1.5;">
+              Adroit Platform • Developer Cloud Infrastructure
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
 </body>
 </html>`
 
 const welcomeText = `Welcome to Adroit, {{ .Name }}!
+========================================
 
-We're thrilled to have you. Your personal developer workspace is ready.
+Your personal developer workspace is ready.
 Open your dashboard: {{ .DashboardURL }}
 
 --
-Adroit Platform Team
+Adroit Platform
 `
 
-const alertHTML = `<!DOCTYPE html>
-<html>
+const alertHTML = `<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
 <head>
-  <meta charset="utf-8">
-  <title>Adroit Alert</title>
+  <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Adroit Alert: {{ .Title }}</title>
 </head>
-<body style="font-family: sans-serif; background: #0b0f19; color: #f3f4f6; padding: 24px;">
-  <div style="max-width: 580px; margin: 0 auto; background: #111827; padding: 32px; border-radius: 8px; border: 1px solid #ef4444;">
-    <h2 style="color: #f87171; margin-top: 0;">[Alert] {{ .Title }}</h2>
-    <p>{{ .Description }}</p>
-    {{ if .ActionURL }}
-    <p><a href="{{ .ActionURL }}" style="background: #ef4444; color: white; padding: 10px 20px; text-decoration: none; border-radius: 6px; display: inline-block;">View in Dashboard</a></p>
-    {{ end }}
-  </div>
+<body style="margin: 0; padding: 0; background-color: #f8fafc; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; -webkit-font-smoothing: antialiased; color: #334155;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #f8fafc; padding: 40px 16px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="max-width: 540px; width: 100%; background-color: #ffffff; border: 1px solid #fecaca; border-top: 3px solid #ef4444; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.04); overflow: hidden; text-align: left;">
+          <tr>
+            <td style="padding: 28px 36px 24px 36px;">
+              <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+                <tr>
+                  <td>
+                    <span style="display: inline-block; padding: 3px 8px; background-color: #fee2e2; color: #b91c1c; font-size: 11px; font-weight: 700; border-radius: 4px; text-transform: uppercase; letter-spacing: 0.05em;">Alert</span>
+                  </td>
+                </tr>
+              </table>
+              <h1 style="margin: 12px 0 16px 0; font-size: 18px; font-weight: 600; color: #0f172a; letter-spacing: -0.01em;">
+                {{ .Title }}
+              </h1>
+              <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 14px 16px; font-family: monospace; font-size: 13px; line-height: 1.5; color: #334155; margin: 16px 0 24px 0;">
+                {{ .Description }}
+              </div>
+              {{ if .ActionURL }}
+              <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin: 20px 0 12px 0;">
+                <tr>
+                  <td>
+                    <a href="{{ .ActionURL }}" target="_blank" style="display: inline-block; background-color: #ef4444; color: #ffffff !important; font-size: 14px; font-weight: 600; text-decoration: none; padding: 10px 24px; border-radius: 6px;">
+                      View in Dashboard
+                    </a>
+                  </td>
+                </tr>
+              </table>
+              {{ end }}
+            </td>
+          </tr>
+        </table>
+        <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="max-width: 540px; width: 100%; margin-top: 20px; text-align: center;">
+          <tr>
+            <td style="font-size: 12px; color: #94a3b8; line-height: 1.5;">
+              Adroit Platform Monitoring & Observability
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
 </body>
 </html>`
 

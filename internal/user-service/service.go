@@ -340,13 +340,13 @@ func (s *Service) GetInvitationPreview(ctx context.Context, rawToken string) (*I
 		return nil, ErrInvalidInvitation
 	}
 
-	if inv.Status != types.InvitationStatusPending {
-		return nil, ErrInvalidInvitation
-	}
-
-	if time.Now().UTC().After(inv.ExpiresAt) {
+	if inv.Status == types.InvitationStatusExpired || time.Now().UTC().After(inv.ExpiresAt) {
 		_ = s.repo.UpdateInvitationStatus(ctx, inv.ID, types.InvitationStatusExpired)
 		return nil, ErrInvitationExpired
+	}
+
+	if inv.Status == types.InvitationStatusRevoked {
+		return nil, ErrInvalidInvitation
 	}
 
 	org, err := s.repo.GetOrganization(ctx, inv.OrganizationID)
@@ -359,6 +359,11 @@ func (s *Service) GetInvitationPreview(ctx context.Context, rawToken string) (*I
 		invitedByName = inviter.Name
 	}
 
+	userExists := false
+	if existingUser, err := s.repo.GetUserByEmail(ctx, inv.Email); err == nil && existingUser != nil {
+		userExists = true
+	}
+
 	return &InvitationPreview{
 		ID:               inv.ID,
 		OrganizationID:   org.ID,
@@ -367,11 +372,18 @@ func (s *Service) GetInvitationPreview(ctx context.Context, rawToken string) (*I
 		Role:             inv.Role,
 		InvitedByName:    invitedByName,
 		ExpiresAt:        inv.ExpiresAt,
+		Token:            rawToken,
+		Status:           string(inv.Status),
+		UserExists:       userExists,
 	}, nil
 }
 
 // AcceptInvitation allows an authenticated user whose email matches the invite to join the org
 func (s *Service) AcceptInvitation(ctx context.Context, userID, rawToken string) (*AcceptInvitationResponse, error) {
+	if strings.TrimSpace(userID) == "" {
+		return nil, ErrUnauthorized
+	}
+
 	user, err := s.repo.GetUser(ctx, userID)
 	if err != nil {
 		return nil, ErrNotFound
@@ -404,7 +416,9 @@ func (s *Service) AcceptInvitation(ctx context.Context, userID, rawToken string)
 
 	// Add member to org
 	if err := s.repo.AddOrgMember(ctx, inv.OrganizationID, user.ID, inv.Role); err != nil {
-		return nil, fmt.Errorf("failed to join organization: %w", err)
+		if !strings.Contains(strings.ToLower(err.Error()), "already") && !strings.Contains(strings.ToLower(err.Error()), "duplicate") {
+			return nil, fmt.Errorf("failed to join organization: %w", err)
+		}
 	}
 
 	// Mark invitation accepted

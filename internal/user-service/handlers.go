@@ -14,24 +14,36 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	"github.com/dev-nathaniel/Adroit-platform/pkg/identity"
 	"github.com/dev-nathaniel/Adroit-platform/pkg/middleware"
 	"github.com/dev-nathaniel/Adroit-platform/pkg/response"
 )
 
 // Handler handles HTTP requests for user and organization endpoints
 type Handler struct {
-	service *Service
+	service   *Service
+	jwtSecret string
 }
 
 // NewHandler creates a new user HTTP handler
-func NewHandler(service *Service) *Handler {
-	return &Handler{service: service}
+func NewHandler(service *Service, jwtSecret ...string) *Handler {
+	h := &Handler{service: service}
+	if len(jwtSecret) > 0 {
+		h.jwtSecret = jwtSecret[0]
+	}
+	return h
 }
 
 // RegisterRoutes registers endpoints onto a Chi router
 func (h *Handler) RegisterRoutes(r chi.Router, jwtSecret string) {
+	if jwtSecret != "" {
+		h.jwtSecret = jwtSecret
+	}
 	// Public Routes (no authentication required)
+	r.Get("/invite", h.HandleInvite)
+	r.Post("/invite/accept", h.MakeHandleAcceptInvitation(jwtSecret))
 	r.Get("/invitations/{token}", h.HandleGetInvitationPreview)
+	r.Post("/invitations/{token}/accept", h.MakeHandleAcceptInvitation(jwtSecret))
 	r.Get("/avatars/{filename}", h.HandleGetAvatar)
 
 	// Protected Routes (requires valid JWT token)
@@ -55,7 +67,6 @@ func (h *Handler) RegisterRoutes(r chi.Router, jwtSecret string) {
 		auth.Post("/organizations/{orgID}/invitations", h.HandleCreateInvitation)
 		auth.Get("/organizations/{orgID}/invitations", h.HandleListInvitations)
 		auth.Delete("/organizations/{orgID}/invitations/{inviteID}", h.HandleRevokeInvitation)
-		auth.Post("/invitations/{token}/accept", h.HandleAcceptInvitation)
 	})
 }
 
@@ -354,12 +365,112 @@ func (h *Handler) HandleCreateInvitation(w http.ResponseWriter, r *http.Request)
 	response.JSON(w, http.StatusCreated, invitation)
 }
 
-// HandleGetInvitationPreview returns public preview details for an invite token
-func (h *Handler) HandleGetInvitationPreview(w http.ResponseWriter, r *http.Request) {
-	token := chi.URLParam(r, "token")
+func isHTMLRequest(r *http.Request) bool {
+	format := r.URL.Query().Get("format")
+	if format == "json" {
+		return false
+	}
+	if format == "html" {
+		return true
+	}
+	if strings.HasPrefix(r.URL.Path, "/invite") {
+		accept := r.Header.Get("Accept")
+		if strings.Contains(accept, "application/json") && !strings.Contains(accept, "text/html") {
+			return false
+		}
+		return true
+	}
+	accept := r.Header.Get("Accept")
+	return strings.Contains(accept, "text/html") && !strings.Contains(accept, "application/json")
+}
+
+// extractAuthUser resolves caller identity from context, Authorization header, or cookie
+func (h *Handler) extractAuthUser(r *http.Request) (string, string) {
+	// 1. Context (set by upstream middleware)
+	if uid := middleware.GetUserID(r.Context()); uid != "" {
+		email := middleware.GetUserEmail(r.Context())
+		if email == "" {
+			if u, err := h.service.GetProfile(r.Context(), uid); err == nil && u != nil {
+				email = u.Email
+			}
+		}
+		return uid, email
+	}
+
+	secret := h.jwtSecret
+	if secret == "" {
+		return "", ""
+	}
+
+	// 2. Authorization header: Bearer <token>
+	authHeader := r.Header.Get("Authorization")
+	if authHeader != "" {
+		parts := strings.SplitN(authHeader, " ", 2)
+		if len(parts) == 2 && strings.EqualFold(parts[0], "Bearer") {
+			if claims, err := identity.ValidateJWT(parts[1], secret); err == nil {
+				email := claims.Email
+				if email == "" {
+					if u, err := h.service.GetProfile(r.Context(), claims.UserID); err == nil && u != nil {
+						email = u.Email
+					}
+				}
+				return claims.UserID, email
+			}
+		}
+	}
+
+	// 3. Cookie: adroit_token
+	if cookie, err := r.Cookie("adroit_token"); err == nil && cookie.Value != "" {
+		if claims, err := identity.ValidateJWT(cookie.Value, secret); err == nil {
+			email := claims.Email
+			if email == "" {
+				if u, err := h.service.GetProfile(r.Context(), claims.UserID); err == nil && u != nil {
+					email = u.Email
+				}
+			}
+			return claims.UserID, email
+		}
+	}
+
+	return "", ""
+}
+
+// HandleInvite handles /invite?token=<rawToken>
+func (h *Handler) HandleInvite(w http.ResponseWriter, r *http.Request) {
+	token := r.URL.Query().Get("token")
+	if token == "" {
+		token = chi.URLParam(r, "token")
+	}
+
+	if token == "" {
+		if isHTMLRequest(r) {
+			renderInvitePage(w, http.StatusBadRequest, nil, nil, "Missing invitation token in URL query parameter (?token=...)", false, "", false)
+			return
+		}
+		response.BadRequest(w, "Invitation token is required", nil)
+		return
+	}
 
 	preview, err := h.service.GetInvitationPreview(r.Context(), token)
 	if err != nil {
+		if isHTMLRequest(r) {
+			var errMsg string
+			var status int
+			switch err {
+			case ErrInvalidInvitation:
+				status = http.StatusNotFound
+				errMsg = "Invitation is invalid or has already been used"
+			case ErrInvitationExpired:
+				status = http.StatusGone
+				errMsg = "This invitation link has expired"
+			default:
+				status = http.StatusInternalServerError
+				errMsg = "Failed to retrieve invitation details"
+			}
+			renderInvitePage(w, status, nil, nil, errMsg, false, "", false)
+			return
+		}
+
 		switch err {
 		case ErrInvalidInvitation:
 			response.NotFound(w, "Invitation is invalid or has already been used")
@@ -371,30 +482,166 @@ func (h *Handler) HandleGetInvitationPreview(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	userID, userEmail := h.extractAuthUser(r)
+	isLoggedIn := userID != ""
+	emailMatches := isLoggedIn && strings.EqualFold(strings.TrimSpace(userEmail), strings.TrimSpace(preview.Email))
+
+	if isHTMLRequest(r) {
+		preview.Token = token
+		renderInvitePage(w, http.StatusOK, preview, nil, "", isLoggedIn, userEmail, emailMatches)
+		return
+	}
+
 	response.JSON(w, http.StatusOK, preview)
 }
 
-// HandleAcceptInvitation allows authenticated users to accept an invitation
-func (h *Handler) HandleAcceptInvitation(w http.ResponseWriter, r *http.Request) {
-	userID := middleware.GetUserID(r.Context())
+// HandleGetInvitationPreview returns public preview details for an invite token
+func (h *Handler) HandleGetInvitationPreview(w http.ResponseWriter, r *http.Request) {
 	token := chi.URLParam(r, "token")
+	if token == "" {
+		token = r.URL.Query().Get("token")
+	}
 
-	res, err := h.service.AcceptInvitation(r.Context(), userID, token)
+	preview, err := h.service.GetInvitationPreview(r.Context(), token)
 	if err != nil {
+		if isHTMLRequest(r) {
+			var errMsg string
+			var status int
+			switch err {
+			case ErrInvalidInvitation:
+				status = http.StatusNotFound
+				errMsg = "Invitation is invalid or has already been used"
+			case ErrInvitationExpired:
+				status = http.StatusGone
+				errMsg = "This invitation link has expired"
+			default:
+				status = http.StatusInternalServerError
+				errMsg = "Failed to retrieve invitation details"
+			}
+			renderInvitePage(w, status, nil, nil, errMsg, false, "", false)
+			return
+		}
+
 		switch err {
 		case ErrInvalidInvitation:
 			response.NotFound(w, "Invitation is invalid or has already been used")
 		case ErrInvitationExpired:
 			response.Error(w, http.StatusGone, "INVITATION_EXPIRED", "This invitation link has expired", nil)
-		case ErrInvitationEmailMismatch:
-			response.Forbidden(w, "Your account email does not match the invitation email")
 		default:
-			response.InternalServerError(w, err.Error())
+			response.InternalServerError(w, "Failed to retrieve invitation details")
 		}
 		return
 	}
 
-	response.JSON(w, http.StatusOK, res)
+	userID, userEmail := h.extractAuthUser(r)
+	isLoggedIn := userID != ""
+	emailMatches := isLoggedIn && strings.EqualFold(strings.TrimSpace(userEmail), strings.TrimSpace(preview.Email))
+
+	if isHTMLRequest(r) {
+		preview.Token = token
+		renderInvitePage(w, http.StatusOK, preview, nil, "", isLoggedIn, userEmail, emailMatches)
+		return
+	}
+
+	response.JSON(w, http.StatusOK, preview)
+}
+
+// MakeHandleAcceptInvitation returns a handler function for accepting invitations
+func (h *Handler) MakeHandleAcceptInvitation(jwtSecret string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if jwtSecret != "" {
+			h.jwtSecret = jwtSecret
+		}
+
+		token := chi.URLParam(r, "token")
+		if token == "" {
+			token = r.URL.Query().Get("token")
+		}
+		if token == "" {
+			_ = r.ParseForm()
+			token = r.FormValue("token")
+		}
+		if token == "" && strings.Contains(r.Header.Get("Content-Type"), "application/json") {
+			var bodyReq struct {
+				Token string `json:"token"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&bodyReq); err == nil {
+				token = bodyReq.Token
+			}
+		}
+
+		if token == "" {
+			if isHTMLRequest(r) {
+				renderInvitePage(w, http.StatusBadRequest, nil, nil, "Missing invitation token", false, "", false)
+				return
+			}
+			response.BadRequest(w, "Invitation token is required", nil)
+			return
+		}
+
+		userID, userEmail := h.extractAuthUser(r)
+		if userID == "" {
+			if isHTMLRequest(r) {
+				if preview, err := h.service.GetInvitationPreview(r.Context(), token); err == nil && preview != nil {
+					preview.Token = token
+					renderInvitePage(w, http.StatusUnauthorized, preview, nil, "Please sign in or create an account to accept this invitation", false, "", false)
+					return
+				}
+				renderInvitePage(w, http.StatusUnauthorized, nil, nil, "Authentication required to accept invitation", false, "", false)
+				return
+			}
+			response.Unauthorized(w, "Authentication required. Please sign in or create an account to accept this invitation")
+			return
+		}
+
+		res, err := h.service.AcceptInvitation(r.Context(), userID, token)
+		if err != nil {
+			if isHTMLRequest(r) {
+				var errMsg string
+				var status int
+				switch err {
+				case ErrInvalidInvitation:
+					status = http.StatusNotFound
+					errMsg = "Invitation is invalid or has already been used"
+				case ErrInvitationExpired:
+					status = http.StatusGone
+					errMsg = "This invitation link has expired"
+				case ErrInvitationEmailMismatch:
+					status = http.StatusForbidden
+					errMsg = fmt.Sprintf("Your account email (%s) does not match the invitation email", userEmail)
+				default:
+					status = http.StatusInternalServerError
+					errMsg = err.Error()
+				}
+				renderInvitePage(w, status, nil, nil, errMsg, true, userEmail, false)
+				return
+			}
+
+			switch err {
+			case ErrInvalidInvitation:
+				response.NotFound(w, "Invitation is invalid or has already been used")
+			case ErrInvitationExpired:
+				response.Error(w, http.StatusGone, "INVITATION_EXPIRED", "This invitation link has expired", nil)
+			case ErrInvitationEmailMismatch:
+				response.Forbidden(w, "Your account email does not match the invitation email")
+			default:
+				response.InternalServerError(w, err.Error())
+			}
+			return
+		}
+
+		if isHTMLRequest(r) {
+			renderInvitePage(w, http.StatusOK, nil, res, "", true, userEmail, true)
+			return
+		}
+
+		response.JSON(w, http.StatusOK, res)
+	}
+}
+
+// HandleAcceptInvitation allows authenticated users to accept an invitation
+func (h *Handler) HandleAcceptInvitation(w http.ResponseWriter, r *http.Request) {
+	h.MakeHandleAcceptInvitation("")(w, r)
 }
 
 // HandleListInvitations lists pending invitations for an organization

@@ -23,9 +23,9 @@ internal/notification-service/
 ## 2. Core Components
 
 ### 2.1 `TemplateManager`
-Pre-compiles HTML and plain-text templates with responsive, dark-mode CSS styling matching Adroit's UI design system.
+Pre-compiles HTML and plain-text templates with standard, modern typography and clean responsive layout matching Adroit's developer design system.
 
-- **`org_invitation`**: Features gradient headers, inviter details, organization name, role badge, primary "Accept Invitation" CTA button linking to `/invite?token=...`, expiration reminder, and plaintext fallback.
+- **`org_invitation`**: Features clean branding, inviter details, organization name, role pill badge, primary "Accept Invitation" CTA button linking to `/invite?token=...`, expiration reminder, and plaintext fallback.
 - **`welcome`**: Onboarding email for newly registered developers.
 - **`alert`**: High-priority notifications for failed builds, crashing services, or quota warnings.
 
@@ -54,8 +54,8 @@ Subscribes to NATS JetStream events:
   "invited_by_id": "usr_01J8W...",
   "invited_by_name": "Jane Doe",
   "invited_by_email": "jane@acme.com",
-  "invite_url": "http://localhost:3000/invite?token=...",
-  "expires_at": "2026-10-07T00:00:00Z"
+  "invite_url": "http://localhost:8080/invite?token=...",
+  "expires_at": "2026-10-08T00:00:00Z"
 }
 ```
 

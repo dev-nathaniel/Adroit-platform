@@ -34,7 +34,7 @@ The **Notification Service** acts as the centralized communications hub for the 
 | `SMTP_PASSWORD` | `string` | `""` | SMTP authentication password / API key |
 | `SMTP_FROM` | `string` | `Adroit Platform <no-reply@adroit.run>` | Default RFC 5322 From address |
 | `SMTP_SKIP_VERIFY` | `bool` | `false` | Insecurely skip TLS certificate verification |
-| `APP_URL` | `string` | `http://localhost:3000` | Platform frontend base URL for invite and dashboard links |
+| `APP_URL` | `string` | `http://localhost:8080` | Platform base URL for invite and dashboard links (points to API gateway in local dev) |
 
 ---
 

@@ -49,7 +49,7 @@ func NewService(
 		log = slog.Default()
 	}
 	if appURL == "" {
-		appURL = "http://localhost:3000"
+		appURL = "http://localhost:8080"
 	}
 
 	return &Service{
@@ -75,7 +75,7 @@ func (s *Service) SendInviteEmail(ctx context.Context, p events.OrgMemberInvited
 
 	inviterName := p.InvitedByName
 	if inviterName == "" {
-		inviterName = "A workspace administrator"
+		inviterName = "A team administrator"
 	}
 
 	role := p.Role
@@ -92,6 +92,8 @@ func (s *Service) SendInviteEmail(ctx context.Context, p events.OrgMemberInvited
 		"OrganizationName": orgName,
 		"InvitedByName":    inviterName,
 		"InviterName":      inviterName,
+		"InvitedByEmail":   p.InvitedByEmail,
+		"RecipientEmail":   p.Email,
 		"Role":             role,
 		"InviteURL":        inviteURL,
 		"ExpiresAt":        expiresStr,

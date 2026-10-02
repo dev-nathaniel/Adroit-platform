@@ -69,6 +69,9 @@ type InvitationPreview struct {
 	Role             string    `json:"role"`
 	InvitedByName    string    `json:"invited_by_name"`
 	ExpiresAt        time.Time `json:"expires_at"`
+	Token            string    `json:"token,omitempty"`
+	Status           string    `json:"status,omitempty"`
+	UserExists       bool      `json:"user_exists"`
 }
 
 // AcceptInvitationResponse is returned when an invitation is successfully accepted

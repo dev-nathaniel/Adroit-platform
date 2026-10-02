@@ -97,6 +97,8 @@ func SetupRouter(log *slog.Logger, rl any, downstreams DownstreamConfig) *chi.Mu
 	if downstreams.UserServiceURL != "" {
 		if userProxy, err := apigateway.CreateServiceProxy("user-service", downstreams.UserServiceURL, log); err == nil {
 			r.Mount("/api/v1/users", userProxy)
+			r.HandleFunc("/invite", userProxy.ServeHTTP)
+			r.HandleFunc("/invite/*", userProxy.ServeHTTP)
 			log.Info("Mounted proxy for user-service", slog.String("target", downstreams.UserServiceURL))
 		}
 	}

@@ -36,6 +36,7 @@ type Repository interface {
 	ListOrgMembers(ctx context.Context, orgID string) ([]OrgMemberInfo, error)
 	GetMemberRole(ctx context.Context, orgID, userID string) (string, error)
 	GetUserByEmail(ctx context.Context, email string) (*types.User, error)
+	CreateUser(ctx context.Context, user *types.User) error
 
 	// Invitation operations
 	CreateInvitation(ctx context.Context, inv *types.OrganizationInvitation, tokenHash string) error
@@ -78,6 +79,15 @@ func (r *PostgresRepository) GetUserByEmail(ctx context.Context, email string) (
 		return nil, fmt.Errorf("failed to get user by email: %w", err)
 	}
 	return &u, nil
+}
+
+func (r *PostgresRepository) CreateUser(ctx context.Context, user *types.User) error {
+	query := `INSERT INTO users (id, email, name, password_hash, avatar_url, created_at, updated_at)
+	          VALUES ($1, $2, $3, $4, $5, $6, $7)
+	          ON CONFLICT (email) DO UPDATE SET updated_at = CURRENT_TIMESTAMP
+	          RETURNING id, created_at, updated_at`
+	return r.db.QueryRowContext(ctx, query, user.ID, user.Email, user.Name, "", user.AvatarURL, user.CreatedAt, user.UpdatedAt).
+		Scan(&user.ID, &user.CreatedAt, &user.UpdatedAt)
 }
 
 func (r *PostgresRepository) UpdateUser(ctx context.Context, user *types.User) error {
@@ -336,11 +346,24 @@ func (m *MemoryRepository) GetUserByEmail(ctx context.Context, email string) (*t
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	for _, u := range m.users {
-		if u.Email == email {
+		if strings.EqualFold(u.Email, email) {
 			return u, nil
 		}
 	}
 	return nil, ErrNotFound
+}
+
+func (m *MemoryRepository) CreateUser(ctx context.Context, user *types.User) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, u := range m.users {
+		if strings.EqualFold(u.Email, user.Email) {
+			*user = *u
+			return nil
+		}
+	}
+	m.users[user.ID] = user
+	return nil
 }
 
 func (m *MemoryRepository) UpdateUser(ctx context.Context, user *types.User) error {

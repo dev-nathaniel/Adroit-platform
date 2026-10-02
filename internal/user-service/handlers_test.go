@@ -513,4 +513,214 @@ func TestAvatarUploadValidation(t *testing.T) {
 	})
 }
 
+func TestInvitePageAndPublicAcceptance(t *testing.T) {
+	repo := userservice.NewMemoryRepository()
+	svc := userservice.NewService(repo)
+	handler := userservice.NewHandler(svc)
+	jwtSecret := "test-secret-12345"
+
+	r := chi.NewRouter()
+	handler.RegisterRoutes(r, jwtSecret)
+
+	// Seed inviter and organization
+	owner := &types.User{
+		ID:        "usr-owner-1",
+		Email:     "owner@adroit.run",
+		Name:      "Alice Owner",
+		CreatedAt: time.Now().UTC(),
+		UpdatedAt: time.Now().UTC(),
+	}
+	repo.SeedUser(owner)
+	ownerToken, _ := identity.GenerateJWT(owner.ID, owner.Email, jwtSecret, 1*time.Hour)
+
+	// Create organization
+	orgReqBody, _ := json.Marshal(userservice.CreateOrgRequest{Name: "Acme Tech", Slug: "acme-tech"})
+	reqCreateOrg := httptest.NewRequest(http.MethodPost, "/organizations", bytes.NewReader(orgReqBody))
+	reqCreateOrg.Header.Set("Authorization", "Bearer "+ownerToken)
+	recCreateOrg := httptest.NewRecorder()
+	r.ServeHTTP(recCreateOrg, reqCreateOrg)
+	if recCreateOrg.Code != http.StatusCreated {
+		t.Fatalf("failed to create org: %d", recCreateOrg.Code)
+	}
+
+	var orgRes response.APIResponse[types.Organization]
+	_ = json.Unmarshal(recCreateOrg.Body.Bytes(), &orgRes)
+	orgID := orgRes.Data.ID
+
+	// Create an invitation
+	inviteReqBody, _ := json.Marshal(userservice.CreateInvitationRequest{
+		Email: "developer@adroit.run",
+		Role:  "member",
+	})
+	reqInvite := httptest.NewRequest(http.MethodPost, "/organizations/"+orgID+"/invitations", bytes.NewReader(inviteReqBody))
+	reqInvite.Header.Set("Authorization", "Bearer "+ownerToken)
+	recInvite := httptest.NewRecorder()
+	r.ServeHTTP(recInvite, reqInvite)
+	if recInvite.Code != http.StatusCreated {
+		t.Fatalf("failed to create invite: %d", recInvite.Code)
+	}
+
+	var inviteRes response.APIResponse[userservice.InvitationResponse]
+	_ = json.Unmarshal(recInvite.Body.Bytes(), &inviteRes)
+	token := inviteRes.Data.Token
+
+	// 1. Unauthenticated Browser GET /invite?token=<token> with Accept: text/html
+	// Must show login/signup form pre-filled with invited email, NOT direct single-click acceptance
+	reqHTML := httptest.NewRequest(http.MethodGet, "/invite?token="+token, nil)
+	reqHTML.Header.Set("Accept", "text/html,application/xhtml+xml")
+	recHTML := httptest.NewRecorder()
+	r.ServeHTTP(recHTML, reqHTML)
+
+	if recHTML.Code != http.StatusOK {
+		t.Fatalf("expected 200 on /invite HTML, got %d", recHTML.Code)
+	}
+	htmlBody := recHTML.Body.String()
+	if !strings.Contains(htmlBody, "Acme Tech") {
+		t.Errorf("expected HTML to contain Acme Tech, got %s", htmlBody)
+	}
+	if !strings.Contains(htmlBody, "developer@adroit.run") {
+		t.Errorf("expected HTML to contain invited email developer@adroit.run, got %s", htmlBody)
+	}
+	if !strings.Contains(htmlBody, "Sign In") || !strings.Contains(htmlBody, "Create Account") {
+		t.Errorf("expected HTML to show Sign In / Create Account tabs, got %s", htmlBody)
+	}
+
+	// 2. API GET /invite?token=<token> with Accept: application/json
+	reqJSON := httptest.NewRequest(http.MethodGet, "/invite?token="+token, nil)
+	reqJSON.Header.Set("Accept", "application/json")
+	recJSON := httptest.NewRecorder()
+	r.ServeHTTP(recJSON, reqJSON)
+
+	if recJSON.Code != http.StatusOK {
+		t.Fatalf("expected 200 on /invite JSON, got %d", recJSON.Code)
+	}
+	var previewRes response.APIResponse[userservice.InvitationPreview]
+	_ = json.Unmarshal(recJSON.Body.Bytes(), &previewRes)
+	if previewRes.Data.Email != "developer@adroit.run" || previewRes.Data.OrganizationName != "Acme Tech" {
+		t.Errorf("unexpected preview data: %+v", previewRes.Data)
+	}
+
+	// 3. Unauthenticated Acceptance via POST /invitations/{token}/accept must fail with 401 Unauthorized
+	reqUnauthAccept := httptest.NewRequest(http.MethodPost, "/invitations/"+token+"/accept", nil)
+	recUnauthAccept := httptest.NewRecorder()
+	r.ServeHTTP(recUnauthAccept, reqUnauthAccept)
+
+	if recUnauthAccept.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 for unauthenticated accept, got %d: %s", recUnauthAccept.Code, recUnauthAccept.Body.String())
+	}
+
+	// 4. Authenticated with a different/mismatched email -> Account Mismatch
+	wrongUser := &types.User{
+		ID:        "usr-wrong-999",
+		Email:     "wrong@adroit.run",
+		Name:      "Wrong User",
+		CreatedAt: time.Now().UTC(),
+		UpdatedAt: time.Now().UTC(),
+	}
+	repo.SeedUser(wrongUser)
+	wrongToken, _ := identity.GenerateJWT(wrongUser.ID, wrongUser.Email, jwtSecret, 1*time.Hour)
+
+	// Visiting /invite with mismatched auth token shows Account Mismatch
+	reqMismatchHTML := httptest.NewRequest(http.MethodGet, "/invite?token="+token, nil)
+	reqMismatchHTML.Header.Set("Accept", "text/html")
+	reqMismatchHTML.Header.Set("Authorization", "Bearer "+wrongToken)
+	recMismatchHTML := httptest.NewRecorder()
+	r.ServeHTTP(recMismatchHTML, reqMismatchHTML)
+
+	if recMismatchHTML.Code != http.StatusOK {
+		t.Fatalf("expected 200 on mismatch HTML, got %d", recMismatchHTML.Code)
+	}
+	if !strings.Contains(recMismatchHTML.Body.String(), "Account Mismatch") {
+		t.Errorf("expected HTML to indicate Account Mismatch, got %s", recMismatchHTML.Body.String())
+	}
+
+	// POST /invitations/{token}/accept with mismatched token fails with 403 Forbidden
+	reqMismatchAccept := httptest.NewRequest(http.MethodPost, "/invitations/"+token+"/accept", nil)
+	reqMismatchAccept.Header.Set("Authorization", "Bearer "+wrongToken)
+	recMismatchAccept := httptest.NewRecorder()
+	r.ServeHTTP(recMismatchAccept, reqMismatchAccept)
+
+	if recMismatchAccept.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for mismatched account accept, got %d: %s", recMismatchAccept.Code, recMismatchAccept.Body.String())
+	}
+
+	// 5. Seed invited user and authenticate matching account
+	invitedUser := &types.User{
+		ID:        "usr-dev-333",
+		Email:     "developer@adroit.run",
+		Name:      "Dev User",
+		CreatedAt: time.Now().UTC(),
+		UpdatedAt: time.Now().UTC(),
+	}
+	repo.SeedUser(invitedUser)
+	devToken, _ := identity.GenerateJWT(invitedUser.ID, invitedUser.Email, jwtSecret, 1*time.Hour)
+
+	// Visiting /invite as authenticated matching user shows direct acceptance screen
+	reqDevHTML := httptest.NewRequest(http.MethodGet, "/invite?token="+token, nil)
+	reqDevHTML.Header.Set("Accept", "text/html")
+	reqDevHTML.Header.Set("Authorization", "Bearer "+devToken)
+	recDevHTML := httptest.NewRecorder()
+	r.ServeHTTP(recDevHTML, reqDevHTML)
+
+	if recDevHTML.Code != http.StatusOK {
+		t.Fatalf("expected 200 on matching user HTML, got %d", recDevHTML.Code)
+	}
+	devHTML := recDevHTML.Body.String()
+	if !strings.Contains(devHTML, "Accept Invitation &amp; Join Workspace") && !strings.Contains(devHTML, "Accept Invitation & Join Workspace") {
+		t.Errorf("expected HTML to contain direct accept button, got %s", devHTML)
+	}
+	if !strings.Contains(devHTML, "Verified") {
+		t.Errorf("expected HTML to contain Verified session badge, got %s", devHTML)
+	}
+
+	// 6. Authenticated Acceptance via POST /invitations/{token}/accept succeeds
+	reqAccept := httptest.NewRequest(http.MethodPost, "/invitations/"+token+"/accept", nil)
+	reqAccept.Header.Set("Authorization", "Bearer "+devToken)
+	recAccept := httptest.NewRecorder()
+	r.ServeHTTP(recAccept, reqAccept)
+
+	if recAccept.Code != http.StatusOK {
+		t.Fatalf("expected 200 on authenticated accept, got %d: %s", recAccept.Code, recAccept.Body.String())
+	}
+
+	var acceptRes response.APIResponse[userservice.AcceptInvitationResponse]
+	_ = json.Unmarshal(recAccept.Body.Bytes(), &acceptRes)
+	if acceptRes.Data.Role != "member" || acceptRes.Data.OrganizationID != orgID {
+		t.Errorf("unexpected accept response: %+v", acceptRes.Data)
+	}
+
+	// 7. Second acceptance fails with 404/invalid
+	reqAcceptAgain := httptest.NewRequest(http.MethodPost, "/invitations/"+token+"/accept", nil)
+	reqAcceptAgain.Header.Set("Authorization", "Bearer "+devToken)
+	recAcceptAgain := httptest.NewRecorder()
+	r.ServeHTTP(recAcceptAgain, reqAcceptAgain)
+	if recAcceptAgain.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 when accepting already-accepted invite, got %d", recAcceptAgain.Code)
+	}
+
+	// 8. Visiting /invite after acceptance shows "Invitation Already Accepted"
+	reqAfterHTML := httptest.NewRequest(http.MethodGet, "/invite?token="+token, nil)
+	reqAfterHTML.Header.Set("Accept", "text/html")
+	recAfterHTML := httptest.NewRecorder()
+	r.ServeHTTP(recAfterHTML, reqAfterHTML)
+	if recAfterHTML.Code != http.StatusOK {
+		t.Fatalf("expected 200 for accepted invite preview, got %d", recAfterHTML.Code)
+	}
+	if !strings.Contains(recAfterHTML.Body.String(), "Invitation Already Accepted") {
+		t.Errorf("expected 'Invitation Already Accepted' in HTML, got %s", recAfterHTML.Body.String())
+	}
+
+	// 9. Invalid token returns error HTML on browser request
+	reqBadToken := httptest.NewRequest(http.MethodGet, "/invite?token=non_existent_token_12345", nil)
+	reqBadToken.Header.Set("Accept", "text/html")
+	recBadToken := httptest.NewRecorder()
+	r.ServeHTTP(recBadToken, reqBadToken)
+	if recBadToken.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 for bad token, got %d", recBadToken.Code)
+	}
+	if !strings.Contains(recBadToken.Body.String(), "Invitation Unavailable") {
+		t.Errorf("expected error banner in HTML, got %s", recBadToken.Body.String())
+	}
+}
+
 

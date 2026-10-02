@@ -211,5 +211,37 @@ func TestAPIGatewayRouter(t *testing.T) {
 			t.Errorf("expected pro limit 250, got %s", rec.Header().Get("X-RateLimit-Limit"))
 		}
 	})
+
+	t.Run("Proxy forwards /invite traffic to downstream user service", func(t *testing.T) {
+		mockUser := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			response.JSON(w, http.StatusOK, map[string]string{
+				"service": "user-service",
+				"path":    r.URL.Path,
+				"token":   r.URL.Query().Get("token"),
+			})
+		}))
+		defer mockUser.Close()
+
+		proxyRouter := SetupRouter(log, nil, DownstreamConfig{
+			UserServiceURL: mockUser.URL,
+		})
+
+		req := httptest.NewRequest(http.MethodGet, "/invite?token=secret-token-xyz", nil)
+		rec := httptest.NewRecorder()
+		proxyRouter.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected 200 on proxied /invite request, got %d: %s", rec.Code, rec.Body.String())
+		}
+
+		var res response.APIResponse[map[string]string]
+		_ = json.Unmarshal(rec.Body.Bytes(), &res)
+		if res.Data["service"] != "user-service" {
+			t.Errorf("expected user-service, got %s", res.Data["service"])
+		}
+		if res.Data["token"] != "secret-token-xyz" {
+			t.Errorf("expected token secret-token-xyz, got %s", res.Data["token"])
+		}
+	})
 }
 

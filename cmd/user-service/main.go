@@ -84,7 +84,7 @@ func main() {
 	}
 
 	svc := userservice.NewService(repo, svcOpts...)
-	handler := userservice.NewHandler(svc)
+	handler := userservice.NewHandler(svc, jwtSecret)
 
 	// 5. Chi Router
 	r := chi.NewRouter()
@@ -103,6 +103,10 @@ func main() {
 			"status":  "healthy",
 		})
 	})
+
+	// Public Invitation Routes
+	r.Get("/invite", handler.HandleInvite)
+	r.Post("/invite/accept", handler.MakeHandleAcceptInvitation(jwtSecret))
 
 	r.Route("/api/v1/users", func(userRouter chi.Router) {
 		handler.RegisterRoutes(userRouter, jwtSecret)

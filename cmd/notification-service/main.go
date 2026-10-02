@@ -24,7 +24,7 @@ func main() {
 	baseCfg := config.LoadBaseConfig(8083)
 	natsURL := config.GetEnv("NATS_URL", "nats://localhost:4222")
 	providerType := config.GetEnv("NOTIFICATION_PROVIDER", "console") // "console" or "smtp"
-	appURL := config.GetEnv("APP_URL", "http://localhost:3000")
+	appURL := config.GetEnv("APP_URL", "http://localhost:8080")
 
 	log := logger.New(logger.Config{
 		Level:  baseCfg.LogLevel,
