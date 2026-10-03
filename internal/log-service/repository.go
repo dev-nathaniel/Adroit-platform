@@ -43,13 +43,22 @@ func NewPostgresRepository(db *sql.DB) *PostgresRepository {
 // InsertLog inserts an individual log entry
 func (r *PostgresRepository) InsertLog(ctx context.Context, entry types.AppLogEntry) error {
 	if entry.ID == "" {
-		entry.ID = uuid.New().String()
+		entry.ID = "log_" + uuid.New().String()[:12]
 	}
 	if entry.Timestamp.IsZero() {
 		entry.Timestamp = time.Now().UTC()
 	}
 	if entry.Stream == "" {
 		entry.Stream = "stdout"
+	}
+
+	depID := entry.DeploymentID
+	if depID != nil && strings.TrimSpace(*depID) == "" {
+		depID = nil
+	}
+	allocID := entry.AllocationID
+	if allocID != nil && strings.TrimSpace(*allocID) == "" {
+		allocID = nil
 	}
 
 	query := `
@@ -59,8 +68,8 @@ func (r *PostgresRepository) InsertLog(ctx context.Context, entry types.AppLogEn
 	_, err := r.db.ExecContext(ctx, query,
 		entry.ID,
 		entry.ServiceID,
-		entry.DeploymentID,
-		entry.AllocationID,
+		depID,
+		allocID,
 		entry.Stream,
 		entry.Message,
 		entry.Timestamp,
@@ -92,7 +101,7 @@ func (r *PostgresRepository) InsertLogsBatch(ctx context.Context, entries []type
 	for _, entry := range entries {
 		id := entry.ID
 		if id == "" {
-			id = uuid.New().String()
+			id = "log_" + uuid.New().String()[:12]
 		}
 		ts := entry.Timestamp
 		if ts.IsZero() {
@@ -102,12 +111,20 @@ func (r *PostgresRepository) InsertLogsBatch(ctx context.Context, entries []type
 		if stream == "" {
 			stream = "stdout"
 		}
+		depID := entry.DeploymentID
+		if depID != nil && strings.TrimSpace(*depID) == "" {
+			depID = nil
+		}
+		allocID := entry.AllocationID
+		if allocID != nil && strings.TrimSpace(*allocID) == "" {
+			allocID = nil
+		}
 
 		_, err := stmt.ExecContext(ctx,
 			id,
 			entry.ServiceID,
-			entry.DeploymentID,
-			entry.AllocationID,
+			depID,
+			allocID,
 			stream,
 			entry.Message,
 			ts,

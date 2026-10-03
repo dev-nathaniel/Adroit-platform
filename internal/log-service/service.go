@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -84,10 +85,16 @@ func (s *Service) IngestLogs(ctx context.Context, serviceID string, req IngestLo
 		if depID == nil && req.DeploymentID != "" {
 			depID = &req.DeploymentID
 		}
+		if depID != nil && strings.TrimSpace(*depID) == "" {
+			depID = nil
+		}
 
 		allocID := item.AllocationID
 		if allocID == nil && req.AllocationID != "" {
 			allocID = &req.AllocationID
+		}
+		if allocID != nil && strings.TrimSpace(*allocID) == "" {
+			allocID = nil
 		}
 
 		entry := types.AppLogEntry{
@@ -118,6 +125,9 @@ func (s *Service) IngestLogs(ctx context.Context, serviceID string, req IngestLo
 
 // IngestSystemLog records an automated platform event line for a service
 func (s *Service) IngestSystemLog(ctx context.Context, serviceID string, deploymentID *string, message string) {
+	if deploymentID != nil && strings.TrimSpace(*deploymentID) == "" {
+		deploymentID = nil
+	}
 	entry := types.AppLogEntry{
 		ID:           "log_" + uuid.New().String()[:12],
 		ServiceID:    serviceID,
