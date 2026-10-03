@@ -120,6 +120,9 @@ func main() {
 	r.Use(middleware.CORS("*"))
 
 	handler := dnsservice.NewHandler(svc)
+	r.Route("/api/v1", func(api chi.Router) {
+		handler.RegisterRoutes(api, jwtSecret)
+	})
 	handler.RegisterRoutes(r, jwtSecret)
 
 	// 10. Start HTTP server

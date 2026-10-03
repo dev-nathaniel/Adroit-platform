@@ -360,11 +360,14 @@ func (r *PostgresRepository) GetService(ctx context.Context, serviceID string) (
 		FROM services
 		WHERE id = $1
 	`
-	var s types.Service
+	var (
+		s                                types.Service
+		projID, repoURL, branch, healthPath, activeDepID sql.NullString
+	)
 	err := r.db.QueryRowContext(ctx, query, serviceID).Scan(
-		&s.ID, &s.ProjectID, &s.Name, &s.Slug, &s.Type, &s.RuntimeTier, &s.RepoURL, &s.Branch, &s.Port,
+		&s.ID, &projID, &s.Name, &s.Slug, &s.Type, &s.RuntimeTier, &repoURL, &branch, &s.Port,
 		&s.MinReplicas, &s.MaxReplicas, &s.Resources.CPUCores, &s.Resources.MemoryMB, &s.Resources.DiskMB,
-		&s.HealthCheck.Path, &s.ActiveDeploymentID, &s.CreatedAt, &s.UpdatedAt,
+		&healthPath, &activeDepID, &s.CreatedAt, &s.UpdatedAt,
 	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -372,12 +375,27 @@ func (r *PostgresRepository) GetService(ctx context.Context, serviceID string) (
 		}
 		return nil, err
 	}
+	if projID.Valid {
+		s.ProjectID = &projID.String
+	}
+	if repoURL.Valid {
+		s.RepoURL = repoURL.String
+	}
+	if branch.Valid {
+		s.Branch = branch.String
+	}
+	if healthPath.Valid {
+		s.HealthCheck.Path = healthPath.String
+	}
+	if activeDepID.Valid {
+		s.ActiveDeploymentID = &activeDepID.String
+	}
 	return &s, nil
 }
 
 func (r *PostgresRepository) GetActiveDeploymentForService(ctx context.Context, serviceID string) (*types.Deployment, error) {
 	query := `
-		SELECT d.id, d.service_id, d.build_id, d.status, d.nomad_job_id, d.active_url, d.replicas,
+		SELECT d.id, d.service_id, d.build_id, d.status, COALESCE(d.nomad_job_id, ''), COALESCE(d.active_url, ''), d.replicas,
 		       COALESCE(d.error_message, ''), d.created_at, d.updated_at
 		FROM deployments d
 		JOIN services s ON s.active_deployment_id = d.id
