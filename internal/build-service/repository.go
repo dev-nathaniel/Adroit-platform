@@ -3,7 +3,6 @@ package buildservice
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -71,40 +70,40 @@ func (r *PostgresRepository) CheckOrgMembership(ctx context.Context, orgID, user
 func (r *PostgresRepository) GetServiceByID(ctx context.Context, serviceID string) (*types.Service, error) {
 	query := `
 		SELECT id, organization_id, project_id, name, slug, type, runtime_tier,
-		       repo_url, branch, COALESCE(root_directory, ''), COALESCE(build_command, ''),
-		       COALESCE(start_command, ''), COALESCE(dockerfile_path, ''), port,
-		       min_replicas, max_replicas, resources, health_check,
-		       COALESCE(webhook_secret, ''), created_at, updated_at
+		       repo_url, branch, root_directory, build_command, start_command,
+		       dockerfile_path, port, min_replicas, max_replicas, cpu_cores,
+		       memory_mb, disk_mb, health_check_path, webhook_secret, created_at, updated_at
 		FROM services
 		WHERE id = $1
 	`
 	var (
-		s           types.Service
-		projectID   sql.NullString
-		resources   []byte
-		healthCheck []byte
+		s                                                                        types.Service
+		projID, rootDir, buildCmd, startCmd, dockerPath, healthPath, webhookSec sql.NullString
+		sType, rTier                                                             string
 	)
 
 	err := r.db.QueryRowContext(ctx, query, serviceID).Scan(
 		&s.ID,
 		&s.OrganizationID,
-		&projectID,
+		&projID,
 		&s.Name,
 		&s.Slug,
-		&s.Type,
-		&s.RuntimeTier,
+		&sType,
+		&rTier,
 		&s.RepoURL,
 		&s.Branch,
-		&s.RootDirectory,
-		&s.BuildCommand,
-		&s.StartCommand,
-		&s.DockerfilePath,
+		&rootDir,
+		&buildCmd,
+		&startCmd,
+		&dockerPath,
 		&s.Port,
 		&s.MinReplicas,
 		&s.MaxReplicas,
-		&resources,
-		&healthCheck,
-		&s.WebhookSecret,
+		&s.Resources.CPUCores,
+		&s.Resources.MemoryMB,
+		&s.Resources.DiskMB,
+		&healthPath,
+		&webhookSec,
 		&s.CreatedAt,
 		&s.UpdatedAt,
 	)
@@ -115,16 +114,32 @@ func (r *PostgresRepository) GetServiceByID(ctx context.Context, serviceID strin
 		return nil, fmt.Errorf("failed to get service: %w", err)
 	}
 
-	if projectID.Valid {
-		pID := projectID.String
+	if projID.Valid {
+		pID := projID.String
 		s.ProjectID = &pID
 	}
-
-	if len(resources) > 0 {
-		_ = json.Unmarshal(resources, &s.Resources)
+	s.Type = types.ServiceType(sType)
+	s.RuntimeTier = types.RuntimeTier(rTier)
+	if rootDir.Valid {
+		s.RootDirectory = rootDir.String
 	}
-	if len(healthCheck) > 0 {
-		_ = json.Unmarshal(healthCheck, &s.HealthCheck)
+	if buildCmd.Valid {
+		s.BuildCommand = buildCmd.String
+	}
+	if startCmd.Valid {
+		s.StartCommand = startCmd.String
+	}
+	if dockerPath.Valid {
+		s.DockerfilePath = dockerPath.String
+	}
+	if healthPath.Valid && healthPath.String != "" {
+		s.HealthCheck.Path = healthPath.String
+	} else {
+		s.HealthCheck.Path = "/healthz"
+	}
+	s.HealthCheck.Port = s.Port
+	if webhookSec.Valid {
+		s.WebhookSecret = webhookSec.String
 	}
 
 	return &s, nil
