@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -66,7 +67,14 @@ func NewService(repo Repository, opts ...Option) *Service {
 		opt(s)
 	}
 	if s.storage == nil {
-		s.storage = storage.NewStorageProviderFromEnv("data/uploads/sources", "/api/v1/services")
+		baseURL := os.Getenv("STORAGE_PUBLIC_BASE_URL")
+		if baseURL == "" {
+			baseURL = os.Getenv("PROJECT_SERVICE_URL")
+		}
+		if baseURL == "" {
+			baseURL = "http://host.docker.internal:8084"
+		}
+		s.storage = storage.NewStorageProviderFromEnv("data/uploads/sources", strings.TrimRight(baseURL, "/")+"/api/v1/services")
 	}
 	return s
 }
