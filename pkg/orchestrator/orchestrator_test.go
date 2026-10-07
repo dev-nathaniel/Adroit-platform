@@ -66,7 +66,7 @@ func TestGenerateJobSpec(t *testing.T) {
 		if !strings.Contains(spec, `API_HOST = "https://api.acme-corp.adroit.run"`) {
 			t.Errorf("expected env var in spec")
 		}
-		if !strings.Contains(spec, `traefik.http.routers.frontend-web.rule=Host("frontend-web-acme-corp.adroit.run")`) {
+		if !strings.Contains(spec, `traefik.http.routers.frontend-web.rule=Host(\"frontend-web-acme-corp.adroit.run\")`) {
 			t.Errorf("expected host routing tag in spec")
 		}
 	})
@@ -334,4 +334,31 @@ func TestSimulatedDriver(t *testing.T) {
 			t.Errorf("expected failure when simulateFailure is true")
 		}
 	})
+}
+
+func TestLiveNomadSubmission(t *testing.T) {
+	client := NewNomadHTTPClient(NomadClientConfig{
+		Address: "http://localhost:4646",
+	})
+	cfg := JobConfig{
+		DeploymentID: "dep-live-test",
+		ServiceID:    "svc-test123",
+		ServiceName:  "Test App",
+		ServiceSlug:  "test-app",
+		ImageTag:     "alpine:latest",
+		Port:         8080,
+		Replicas:     1,
+		Datacenter:   "dc1",
+	}
+	spec, err := GenerateJobSpec(cfg)
+	if err != nil {
+		t.Fatalf("failed to generate job spec: %v", err)
+	}
+
+	res, err := client.SubmitJob(context.Background(), spec)
+	if err != nil {
+		t.Fatalf("live Nomad submission failed: %v", err)
+	}
+	t.Logf("Job successfully parsed and submitted to live Nomad! EvalID: %s, JobID: %s", res.EvalID, res.JobID)
+	_ = client.StopJob(context.Background(), res.JobID, true)
 }

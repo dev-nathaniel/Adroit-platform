@@ -15,9 +15,9 @@ import (
 
 var (
 	reJobID        = regexp.MustCompile(`job\s+"([^"]+)"`)
-	reDeployID     = regexp.MustCompile(`"adroit\.deploy_id"\s*=\s*"([^"]+)"`)
-	reServiceID    = regexp.MustCompile(`"adroit\.service_id"\s*=\s*"([^"]+)"`)
-	reStrategy     = regexp.MustCompile(`"adroit\.strategy"\s*=\s*"([^"]+)"`)
+	reDeployID     = regexp.MustCompile(`(?:"adroit\.deploy_id"|adroit_deploy_id)\s*=\s*"([^"]+)"`)
+	reServiceID    = regexp.MustCompile(`(?:"adroit\.service_id"|adroit_service_id)\s*=\s*"([^"]+)"`)
+	reStrategy     = regexp.MustCompile(`(?:"adroit\.strategy"|adroit_strategy)\s*=\s*"([^"]+)"`)
 	reCount        = regexp.MustCompile(`count\s*=\s*(\d+)`)
 )
 

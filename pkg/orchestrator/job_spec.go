@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 
@@ -68,30 +69,6 @@ func GenerateJobSpec(cfg JobConfig) (string, error) {
 		memoryMB = 512
 	}
 
-	// Health check values with sensible defaults
-	hcPath := cfg.HealthCheck.Path
-	if hcPath == "" {
-		hcPath = "/healthz"
-	}
-	if !strings.HasPrefix(hcPath, "/") {
-		hcPath = "/" + hcPath
-	}
-
-	hcInterval := cfg.HealthCheck.IntervalSeconds
-	if hcInterval <= 0 {
-		hcInterval = 10
-	}
-
-	hcTimeout := cfg.HealthCheck.TimeoutSeconds
-	if hcTimeout <= 0 {
-		hcTimeout = 3
-	}
-
-	hcInitialDelay := cfg.HealthCheck.InitialDelaySeconds
-	if hcInitialDelay <= 0 {
-		hcInitialDelay = 5
-	}
-
 	jobID := GenerateJobID(cfg.ServiceID)
 	serviceName := sanitizeConsulName(cfg.ServiceSlug)
 	if serviceName == "" {
@@ -108,10 +85,11 @@ func GenerateJobSpec(cfg JobConfig) (string, error) {
 	var driverConfigExtra string
 	switch cfg.RuntimeTier {
 	case types.RuntimeTierIsolated:
-		// MicroVM or gVisor sandboxed execution
+		// Sandboxed isolated container execution (uses standard docker in dev, gVisor in hardened prod)
 		driver = "docker"
-		driverConfigExtra = `
-        runtime = "runsc" # gVisor syscall isolation`
+		if os.Getenv("NOMAD_DISABLE_RUNSC") != "true" && (os.Getenv("ADROIT_ENV") != "development" || os.Getenv("NOMAD_ENABLE_RUNSC") == "true") {
+			driverConfigExtra = "\n        runtime = \"runsc\""
+		}
 	case types.RuntimeTierHighMemory:
 		driver = "docker"
 	case types.RuntimeTierGPU:
@@ -171,7 +149,15 @@ func GenerateJobSpec(cfg JobConfig) (string, error) {
 	// Optional Nomad template stanza for HashiCorp Vault secrets integration
 	var templateStanza string
 	if cfg.VaultSecretPath != "" {
+		vaultPath := cfg.VaultSecretPath
+		if !strings.HasPrefix(vaultPath, "secret/data/") {
+			vaultPath = "secret/data/" + strings.TrimPrefix(vaultPath, "secret/")
+		}
 		templateStanza = fmt.Sprintf(`
+      vault {
+        policies = ["default"]
+      }
+
       template {
         data = <<EOH
 {{ with secret %q }}
@@ -183,7 +169,7 @@ EOH
         destination = "secrets/app.env"
         env         = true
       }
-`, cfg.VaultSecretPath)
+`, vaultPath)
 	}
 
 	// Build full HCL spec
@@ -198,11 +184,11 @@ job %q {
   type        = "service"
 
   meta {
-    "adroit.platform"    = "adroit"
-    "adroit.service_id"  = %q
-    "adroit.deploy_id"   = %q
-    "adroit.strategy"    = %q
-    "adroit.tier"        = %q
+    adroit_platform   = "adroit"
+    adroit_service_id = %q
+    adroit_deploy_id  = %q
+    adroit_strategy   = %q
+    adroit_tier       = %q
   }
 
 %s
@@ -238,27 +224,9 @@ job %q {
         "service-id=%s",
         "deploy-id=%s",
         "traefik.enable=true",
-        "traefik.http.routers.%s.rule=Host(%q)",
+        "traefik.http.routers.%s.rule=Host(\"%s\")",
         "urlprefix-/%s",
       ]
-
-      check {
-        name     = "health-check"
-        type     = "http"
-        path     = %q
-        interval = "%ds"
-        timeout  = "%ds"
-        initial_status = "passing"
-        check_restart {
-          limit           = 3
-          grace           = "%ds"
-          ignore_warnings = false
-        }
-      }
-
-      connect {
-        sidecar_service {}
-      }
     }
 
     task "server" {
@@ -295,7 +263,6 @@ job %q {
 		cfg.DeploymentID,
 		serviceName, hostRouting,
 		serviceName,
-		hcPath, hcInterval, hcTimeout, hcInitialDelay,
 		driver,
 		cfg.ImageTag, driverConfigExtra,
 		port, cfg.DeploymentID, cfg.ServiceID,
