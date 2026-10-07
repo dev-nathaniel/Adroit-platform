@@ -382,12 +382,17 @@ func (c *NomadHTTPClient) CheckHealth(ctx context.Context, jobID string) (*Healt
 		return nil, err
 	}
 
-	total := len(allocs)
+	total := 0
 	passing := 0
 	failing := 0
 	canaryReady := false
 
 	for _, a := range allocs {
+		// Ignore dead, completed, or stopped allocations from previous revisions
+		if a.DesiredStatus == "stop" || a.ClientStatus == "complete" || a.ClientStatus == "lost" || a.ClientStatus == "failed" {
+			continue
+		}
+		total++
 		if a.ClientStatus == "running" && a.Healthy {
 			passing++
 			if a.IsCanary {
