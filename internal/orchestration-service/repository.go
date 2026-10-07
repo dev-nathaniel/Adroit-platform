@@ -27,6 +27,7 @@ type Repository interface {
 	GetDeployment(ctx context.Context, id string) (*types.Deployment, error)
 	GetLatestDeploymentForService(ctx context.Context, serviceID string) (*types.Deployment, error)
 	GetLatestSucceededBuildForService(ctx context.Context, serviceID string) (*types.Build, error)
+	CreateBuild(ctx context.Context, b *types.Build) error
 	ListDeploymentsByService(ctx context.Context, serviceID string, limit, offset int) ([]types.Deployment, int, error)
 	UpdateDeploymentStatus(ctx context.Context, id string, status types.DeploymentStatus, nomadJobID, activeURL, errorMsg string) error
 	UpdateDeploymentJobSpec(ctx context.Context, id string, spec string) error
@@ -208,7 +209,8 @@ func (r *PostgresRepository) GetLatestDeploymentForService(ctx context.Context, 
 // GetLatestSucceededBuildForService fetches the newest successful build artifact for a service
 func (r *PostgresRepository) GetLatestSucceededBuildForService(ctx context.Context, serviceID string) (*types.Build, error) {
 	query := `
-		SELECT id, service_id, commit_hash, branch, message, author, status, 
+		SELECT id, service_id, COALESCE(source_type, 'git'), COALESCE(archive_url, ''),
+		       COALESCE(commit_hash, ''), COALESCE(branch, ''), message, author, status, 
 		       image_tag, image_digest, duration_ms, triggered_by, error_message, created_at, finished_at
 		FROM builds
 		WHERE service_id = $1 AND status = 'succeeded'
@@ -216,7 +218,7 @@ func (r *PostgresRepository) GetLatestSucceededBuildForService(ctx context.Conte
 		LIMIT 1
 	`
 	var b types.Build
-	var statusStr string
+	var statusStr, srcType string
 	var imageTag, imageDigest, author, msg, triggeredBy, errorMsg sql.NullString
 	var durationMs sql.NullInt64
 	var finishedAt sql.NullTime
@@ -224,6 +226,8 @@ func (r *PostgresRepository) GetLatestSucceededBuildForService(ctx context.Conte
 	err := r.db.QueryRowContext(ctx, query, serviceID).Scan(
 		&b.ID,
 		&b.ServiceID,
+		&srcType,
+		&b.ArchiveURL,
 		&b.CommitHash,
 		&b.Branch,
 		&msg,
@@ -244,6 +248,7 @@ func (r *PostgresRepository) GetLatestSucceededBuildForService(ctx context.Conte
 		return nil, err
 	}
 
+	b.SourceType = types.SourceType(srcType)
 	b.Status = types.BuildStatus(statusStr)
 	if msg.Valid {
 		b.Message = msg.String
@@ -272,6 +277,46 @@ func (r *PostgresRepository) GetLatestSucceededBuildForService(ctx context.Conte
 	}
 
 	return &b, nil
+}
+
+// CreateBuild inserts a new build record into the builds table
+func (r *PostgresRepository) CreateBuild(ctx context.Context, b *types.Build) error {
+	if b.ID == "" {
+		b.ID = uuid.New().String()
+	}
+	if b.CreatedAt.IsZero() {
+		b.CreatedAt = time.Now().UTC()
+	}
+	if b.SourceType == "" {
+		b.SourceType = types.SourceTypeGit
+	}
+
+	query := `
+		INSERT INTO builds (
+			id, service_id, source_type, archive_url, commit_hash, branch, message, author,
+			status, image_tag, image_digest, duration_ms, triggered_by,
+			error_message, created_at, finished_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+		RETURNING id, created_at
+	`
+	return r.db.QueryRowContext(ctx, query,
+		b.ID,
+		b.ServiceID,
+		string(b.SourceType),
+		b.ArchiveURL,
+		b.CommitHash,
+		b.Branch,
+		b.Message,
+		b.Author,
+		string(b.Status),
+		b.ImageTag,
+		b.ImageDigest,
+		b.DurationMs,
+		b.TriggeredBy,
+		b.ErrorMessage,
+		b.CreatedAt,
+		b.FinishedAt,
+	).Scan(&b.ID, &b.CreatedAt)
 }
 
 // ListDeploymentsByService queries deployments for a service with pagination
@@ -536,8 +581,9 @@ func (r *PostgresRepository) ListDeploymentEvents(ctx context.Context, deploymen
 // GetService fetches a service definition by ID
 func (r *PostgresRepository) GetService(ctx context.Context, serviceID string) (*types.Service, error) {
 	query := `
-		SELECT id, organization_id, project_id, name, slug, type, runtime_tier, repo_url, branch,
-		       root_directory, build_command, start_command, dockerfile_path, port,
+		SELECT id, organization_id, project_id, name, slug, type, runtime_tier,
+		       COALESCE(source_type, 'git'), COALESCE(repo_url, ''), COALESCE(archive_url, ''), COALESCE(image_url, ''),
+		       branch, root_directory, build_command, start_command, dockerfile_path, port,
 		       min_replicas, max_replicas, cpu_cores, memory_mb, disk_mb,
 		       health_check_path, active_deployment_id, created_at, updated_at
 		FROM services
@@ -545,7 +591,7 @@ func (r *PostgresRepository) GetService(ctx context.Context, serviceID string) (
 	`
 	var s types.Service
 	var projID, rootDir, buildCmd, startCmd, dockerfile, hcPath, activeDeploy sql.NullString
-	var serviceTypeStr, tierStr string
+	var serviceTypeStr, tierStr, srcType, repoURL, archiveURL, imageURL string
 
 	err := r.db.QueryRowContext(ctx, query, serviceID).Scan(
 		&s.ID,
@@ -555,7 +601,10 @@ func (r *PostgresRepository) GetService(ctx context.Context, serviceID string) (
 		&s.Slug,
 		&serviceTypeStr,
 		&tierStr,
-		&s.RepoURL,
+		&srcType,
+		&repoURL,
+		&archiveURL,
+		&imageURL,
 		&s.Branch,
 		&rootDir,
 		&buildCmd,
@@ -581,6 +630,11 @@ func (r *PostgresRepository) GetService(ctx context.Context, serviceID string) (
 
 	s.Type = types.ServiceType(serviceTypeStr)
 	s.RuntimeTier = types.RuntimeTier(tierStr)
+	s.SourceType = types.SourceType(srcType)
+	s.RepoURL = repoURL
+	s.ArchiveURL = archiveURL
+	s.ImageURL = imageURL
+
 	if projID.Valid {
 		val := projID.String
 		s.ProjectID = &val
@@ -611,13 +665,14 @@ func (r *PostgresRepository) GetService(ctx context.Context, serviceID string) (
 // GetBuild fetches build metadata by build ID
 func (r *PostgresRepository) GetBuild(ctx context.Context, buildID string) (*types.Build, error) {
 	query := `
-		SELECT id, service_id, commit_hash, branch, message, author, status, 
+		SELECT id, service_id, COALESCE(source_type, 'git'), COALESCE(archive_url, ''),
+		       COALESCE(commit_hash, ''), COALESCE(branch, ''), message, author, status, 
 		       image_tag, image_digest, duration_ms, triggered_by, error_message, created_at, finished_at
 		FROM builds
 		WHERE id = $1
 	`
 	var b types.Build
-	var statusStr string
+	var statusStr, srcType string
 	var imageTag, imageDigest, author, msg, triggeredBy, errorMsg sql.NullString
 	var durationMs sql.NullInt64
 	var finishedAt sql.NullTime
@@ -625,6 +680,8 @@ func (r *PostgresRepository) GetBuild(ctx context.Context, buildID string) (*typ
 	err := r.db.QueryRowContext(ctx, query, buildID).Scan(
 		&b.ID,
 		&b.ServiceID,
+		&srcType,
+		&b.ArchiveURL,
 		&b.CommitHash,
 		&b.Branch,
 		&msg,
@@ -645,6 +702,7 @@ func (r *PostgresRepository) GetBuild(ctx context.Context, buildID string) (*typ
 		return nil, err
 	}
 
+	b.SourceType = types.SourceType(srcType)
 	b.Status = types.BuildStatus(statusStr)
 	if msg.Valid {
 		b.Message = msg.String

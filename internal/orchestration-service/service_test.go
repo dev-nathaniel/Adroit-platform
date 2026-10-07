@@ -192,6 +192,50 @@ func TestTriggerDeploy(t *testing.T) {
 	}
 }
 
+func TestTriggerDeploy_ImageSourceDirect(t *testing.T) {
+	svc, repo, _, _ := setupTestEnvironment()
+	ctx := context.Background()
+
+	serviceID := "svc-image-direct"
+	repo.services[serviceID] = types.Service{
+		ID:          serviceID,
+		Name:        "Postgres Direct",
+		Slug:        "postgres-direct",
+		SourceType:  types.SourceTypeImage,
+		ImageURL:    "postgres:16-alpine",
+		MinReplicas: 1,
+	}
+
+	// No builds exist initially in repo.builds for this service!
+	d, err := svc.TriggerDeploy(ctx, TriggerDeployRequest{
+		ServiceID: serviceID,
+		Replicas:  1,
+		Strategy:  types.RolloutStrategyRolling,
+	})
+	if err != nil {
+		t.Fatalf("TriggerDeploy failed for image service without prior build: %v", err)
+	}
+
+	if d.BuildID == "" {
+		t.Fatalf("expected non-empty synthetic build ID")
+	}
+
+	// Verify build was created in repository
+	createdBuild, err := repo.GetBuild(ctx, d.BuildID)
+	if err != nil {
+		t.Fatalf("expected synthetic build to exist in repository: %v", err)
+	}
+	if createdBuild.SourceType != types.SourceTypeImage {
+		t.Errorf("expected build source_type to be image, got %s", createdBuild.SourceType)
+	}
+	if createdBuild.ImageTag != "postgres:16-alpine" {
+		t.Errorf("expected build image_tag 'postgres:16-alpine', got '%s'", createdBuild.ImageTag)
+	}
+	if createdBuild.Status != types.BuildStatusSucceeded {
+		t.Errorf("expected build status succeeded, got %s", createdBuild.Status)
+	}
+}
+
 func TestScaleService(t *testing.T) {
 	svc, repo, driver, _ := setupTestEnvironment()
 	ctx := context.Background()

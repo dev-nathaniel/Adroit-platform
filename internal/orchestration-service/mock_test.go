@@ -288,3 +288,16 @@ func (m *mockRepository) MarkPreviousDeploymentsReplaced(ctx context.Context, se
 	}
 	return nil
 }
+
+func (m *mockRepository) CreateBuild(ctx context.Context, b *types.Build) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if b.ID == "" {
+		b.ID = uuid.New().String()
+	}
+	if b.CreatedAt.IsZero() {
+		b.CreatedAt = time.Now().UTC()
+	}
+	m.builds[b.ID] = *b
+	return nil
+}

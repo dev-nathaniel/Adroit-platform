@@ -12,6 +12,7 @@
 
 ### Key Responsibilities:
 * **Nomad Job Generation**: Compiles declarative service specifications into Nomad HCL2 job files with Consul Connect sidecars and Traefik ingress tags.
+* **Direct Image Deployments**: Deploys pre-built OCI container images (`source_type: image`) directly without requiring build artifacts or preceding build steps.
 * **Vault Secret Snapshots**: Snapshots configuration and secret values to HashiCorp Vault at `adroit/{orgID}/deployments/{deploymentID}` and mounts them via in-memory `template` stanzas (`secrets/app.env`).
 * **Dual Driver Support**: Pluggable driver layer supporting either live Nomad clusters (`NomadHTTPClient`) or a zero-dependency in-memory simulator (`SimulatedDriver`).
 * **NATS JetStream Consumer**: Listens for asynchronous build completion events (`adroit.deploy.requested`) and emits rollout milestones (`adroit.deploy.started`, `adroit.deploy.healthy`, `adroit.deploy.failed`).

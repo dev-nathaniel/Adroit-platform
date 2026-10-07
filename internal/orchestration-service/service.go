@@ -463,9 +463,35 @@ func (s *Service) TriggerDeploy(ctx context.Context, req TriggerDeployRequest) (
 	} else {
 		b, err := s.repo.GetLatestSucceededBuildForService(ctx, req.ServiceID)
 		if err != nil {
-			return nil, err
+			// If service is SourceTypeImage, synthesize a succeeded build if none exists
+			if errors.Is(err, ErrNoSucceededBuild) && svc.SourceType == types.SourceTypeImage {
+				img := svc.ImageURL
+				if img == "" {
+					img = svc.RepoURL
+				}
+				now := time.Now().UTC()
+				synthBuild := &types.Build{
+					ID:          uuid.New().String(),
+					ServiceID:   svc.ID,
+					SourceType:  types.SourceTypeImage,
+					ImageTag:    img,
+					Status:      types.BuildStatusSucceeded,
+					Message:     fmt.Sprintf("Pre-built container image (%s)", img),
+					Author:      "system",
+					TriggeredBy: "deploy-trigger",
+					CreatedAt:   now,
+					FinishedAt:  &now,
+				}
+				if createErr := s.repo.CreateBuild(ctx, synthBuild); createErr != nil {
+					return nil, fmt.Errorf("failed to create image build record: %w", createErr)
+				}
+				build = synthBuild
+			} else {
+				return nil, err
+			}
+		} else {
+			build = b
 		}
-		build = b
 	}
 
 	strategy := req.Strategy
