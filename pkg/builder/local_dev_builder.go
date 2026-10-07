@@ -3,6 +3,7 @@ package builder
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 )
@@ -44,11 +45,6 @@ func (b *LocalDevBuilder) Build(ctx context.Context, cfg BuildConfig, logWriter 
 
 	startTime := time.Now().UTC()
 
-	// Normalize defaults
-	dockerfile := cfg.DockerfilePath
-	if dockerfile == "" {
-		dockerfile = "Dockerfile"
-	}
 	branch := cfg.Branch
 	if branch == "" {
 		branch = "main"
@@ -75,34 +71,81 @@ func (b *LocalDevBuilder) Build(ctx context.Context, cfg BuildConfig, logWriter 
 		stream string
 	}
 
-	steps := []step{
-		{name: "[+] Building with BuildKit engine (Adroit Local Runner)", stream: "stdout"},
-		{name: fmt.Sprintf("=> [internal] load build definition from %s", dockerfile), stream: "stdout"},
-		{name: "=> [internal] load .dockerignore", stream: "stdout"},
-		{name: "=> [internal] load metadata for docker.io/library/alpine:latest", stream: "stdout"},
-		{name: fmt.Sprintf("=> [internal] load build context from %s (%s@%s)", cfg.RepoURL, branch, commit), stream: "stdout"},
-	}
+	var steps []step
+	if cfg.DockerfilePath == "" {
+		// Cloud Native Buildpack (CNB) Detection & Lifecycle
+		detectedRuntime := "Node.js (LTS 20.x)"
+		buildpackID := "paketo-buildpacks/nodejs"
+		lowerCmd := strings.ToLower(cfg.BuildCommand)
+		lowerSlug := strings.ToLower(cfg.ServiceSlug)
+		if strings.Contains(lowerCmd, "python") || strings.Contains(lowerCmd, "pip") || strings.Contains(lowerSlug, "python") {
+			detectedRuntime = "Python 3.11"
+			buildpackID = "paketo-buildpacks/python"
+		} else if strings.Contains(lowerCmd, "go ") || strings.Contains(lowerCmd, "go build") || strings.Contains(lowerSlug, "go") {
+			detectedRuntime = "Go 1.22"
+			buildpackID = "paketo-buildpacks/go"
+		} else if strings.Contains(lowerCmd, "ruby") || strings.Contains(lowerCmd, "bundle") {
+			detectedRuntime = "Ruby 3.2"
+			buildpackID = "paketo-buildpacks/ruby"
+		}
 
-	if cfg.BuildCommand != "" {
-		steps = append(steps, step{
-			name:   fmt.Sprintf("=> [build-cmd] RUN %s", cfg.BuildCommand),
-			stream: "stdout",
-		})
+		steps = append(steps,
+			step{name: "[+] No Dockerfile found: Invoking Cloud Native Buildpacks (CNB) auto-detection", stream: "stdout"},
+			step{name: fmt.Sprintf("=> [buildpack:detect] Inspecting repository %s (%s@%s)", cfg.RepoURL, branch, commit), stream: "stdout"},
+			step{name: fmt.Sprintf("=> [buildpack:detect] Identified application ecosystem: %s", detectedRuntime), stream: "stdout"},
+			step{name: fmt.Sprintf("=> [buildpack:plan] Selected buildpack pipeline: %s", buildpackID), stream: "stdout"},
+			step{name: "=> [buildpack:build] Setting up hermetic build environment and fetching base layers", stream: "stdout"},
+		)
+		if cfg.BuildCommand != "" {
+			steps = append(steps, step{
+				name:   fmt.Sprintf("=> [build-cmd] RUN %s", cfg.BuildCommand),
+				stream: "stdout",
+			})
+		} else {
+			steps = append(steps, step{
+				name:   fmt.Sprintf("=> [buildpack:build] Running auto-detected build for %s", detectedRuntime),
+				stream: "stdout",
+			})
+		}
+		for k, v := range cfg.BuildArgs {
+			steps = append(steps, step{
+				name:   fmt.Sprintf("=> [build-arg] ARG %s=%s", k, v),
+				stream: "stdout",
+			})
+		}
+		steps = append(steps,
+			step{name: "=> [buildpack:export] Packaging runtime artifact into OCI standard container", stream: "stdout"},
+			step{name: "=> [buildpack:export] Configuring process type 'web' with zero-configuration entrypoint", stream: "stdout"},
+			step{name: "=> exporting to image", stream: "stdout"},
+			step{name: fmt.Sprintf("=> => naming to %s", imageTag), stream: "stdout"},
+		)
+	} else {
+		steps = append(steps,
+			step{name: "[+] Building with BuildKit engine (Adroit Local Runner)", stream: "stdout"},
+			step{name: fmt.Sprintf("=> [internal] load build definition from %s", cfg.DockerfilePath), stream: "stdout"},
+			step{name: "=> [internal] load .dockerignore", stream: "stdout"},
+			step{name: "=> [internal] load metadata for docker.io/library/alpine:latest", stream: "stdout"},
+			step{name: fmt.Sprintf("=> [internal] load build context from %s (%s@%s)", cfg.RepoURL, branch, commit), stream: "stdout"},
+		)
+		if cfg.BuildCommand != "" {
+			steps = append(steps, step{
+				name:   fmt.Sprintf("=> [build-cmd] RUN %s", cfg.BuildCommand),
+				stream: "stdout",
+			})
+		}
+		for k, v := range cfg.BuildArgs {
+			steps = append(steps, step{
+				name:   fmt.Sprintf("=> [build-arg] ARG %s=%s", k, v),
+				stream: "stdout",
+			})
+		}
+		steps = append(steps,
+			step{name: "=> [stage-0 1/2] compiling application and caching container layers", stream: "stdout"},
+			step{name: "=> [stage-0 2/2] stripping debug symbols and optimizing final artifact", stream: "stdout"},
+			step{name: "=> exporting to image", stream: "stdout"},
+			step{name: fmt.Sprintf("=> => naming to %s", imageTag), stream: "stdout"},
+		)
 	}
-
-	for k, v := range cfg.BuildArgs {
-		steps = append(steps, step{
-			name:   fmt.Sprintf("=> [build-arg] ARG %s=%s", k, v),
-			stream: "stdout",
-		})
-	}
-
-	steps = append(steps,
-		step{name: "=> [stage-0 1/2] compiling application and caching container layers", stream: "stdout"},
-		step{name: "=> [stage-0 2/2] stripping debug symbols and optimizing final artifact", stream: "stdout"},
-		step{name: "=> exporting to image", stream: "stdout"},
-		step{name: fmt.Sprintf("=> => naming to %s", imageTag), stream: "stdout"},
-	)
 
 	for _, s := range steps {
 		select {
