@@ -3,6 +3,9 @@ package projectservice
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
+	"mime/multipart"
 	"net/http"
 	"strings"
 
@@ -24,6 +27,9 @@ func NewHandler(service *Service) *Handler {
 
 // RegisterRoutes registers endpoints onto Chi routers
 func (h *Handler) RegisterRoutes(r chi.Router, jwtSecret string) {
+	// Public / worker download endpoint for BuildKit container runner
+	r.Get("/services/{id}/source/download", h.HandleDownloadSource)
+
 	r.Group(func(auth chi.Router) {
 		auth.Use(middleware.RequireAuth(jwtSecret))
 
@@ -52,6 +58,11 @@ func (h *Handler) RegisterRoutes(r chi.Router, jwtSecret string) {
 			sr.Patch("/{id}", h.HandleUpdateService)
 			sr.Post("/{id}/move", h.HandleMoveService)
 			sr.Delete("/{id}", h.HandleDeleteService)
+
+			// Source bundle upload & download
+			sr.Post("/{id}/upload", h.HandleUploadSource)
+			sr.Post("/{id}/source", h.HandleUploadSource)
+			sr.Get("/{id}/source/download", h.HandleDownloadSource)
 
 			// Service-nested routes
 			sr.Get("/{id}/env", h.HandleGetServiceEnv)
@@ -434,6 +445,90 @@ func (h *Handler) HandleRevealProjectSecret(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	response.JSON(w, http.StatusOK, resp)
+}
+
+// HandleUploadSource processes uploaded source archives (zip or tar.gz)
+func (h *Handler) HandleUploadSource(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r.Context())
+	serviceID := chi.URLParam(r, "id")
+	if strings.TrimSpace(serviceID) == "" {
+		response.BadRequest(w, "service_id is required in URL path", nil)
+		return
+	}
+
+	triggerBuild := true
+	if tb := r.URL.Query().Get("trigger_build"); tb == "false" || tb == "0" {
+		triggerBuild = false
+	}
+
+	var filename string
+	var reader io.Reader
+
+	contentType := r.Header.Get("Content-Type")
+	if strings.HasPrefix(contentType, "multipart/form-data") {
+		// Max upload size 200MB
+		if err := r.ParseMultipartForm(200 << 20); err != nil {
+			response.BadRequest(w, "Failed to parse multipart form data: "+err.Error(), nil)
+			return
+		}
+		var fileHeader *multipart.FileHeader
+		for _, formKey := range []string{"file", "archive", "source", "code", "bundle"} {
+			if f, fh, err := r.FormFile(formKey); err == nil {
+				defer f.Close()
+				fileHeader = fh
+				reader = f
+				break
+			}
+		}
+		if fileHeader == nil {
+			response.BadRequest(w, "No archive file found in form data (expected field 'file', 'archive', or 'source')", nil)
+			return
+		}
+		filename = fileHeader.Filename
+	} else {
+		// Raw binary stream body
+		filename = r.URL.Query().Get("filename")
+		if filename == "" {
+			if strings.Contains(contentType, "zip") {
+				filename = "source.zip"
+			} else {
+				filename = "source.tar.gz"
+			}
+		}
+		reader = r.Body
+	}
+
+	res, err := h.service.UploadServiceSource(r.Context(), userID, serviceID, filename, reader, triggerBuild)
+	if err != nil {
+		h.handleError(w, err)
+		return
+	}
+
+	response.JSON(w, http.StatusCreated, res)
+}
+
+// HandleDownloadSource streams the source code archive for BuildKit or client download
+func (h *Handler) HandleDownloadSource(w http.ResponseWriter, r *http.Request) {
+	serviceID := chi.URLParam(r, "id")
+	if strings.TrimSpace(serviceID) == "" {
+		response.BadRequest(w, "service_id is required in URL path", nil)
+		return
+	}
+
+	userID := middleware.GetUserID(r.Context())
+	rc, size, filename, err := h.service.DownloadServiceSource(r.Context(), userID, serviceID)
+	if err != nil {
+		h.handleError(w, err)
+		return
+	}
+	defer rc.Close()
+
+	w.Header().Set("Content-Type", "application/gzip")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
+	if size > 0 {
+		w.Header().Set("Content-Length", fmt.Sprintf("%d", size))
+	}
+	_, _ = io.Copy(w, rc)
 }
 
 // handleError maps internal errors to HTTP responses

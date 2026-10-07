@@ -1,8 +1,11 @@
 package projectservice
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -10,6 +13,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/dev-nathaniel/Adroit-platform/pkg/events"
+	"github.com/dev-nathaniel/Adroit-platform/pkg/storage"
 	"github.com/dev-nathaniel/Adroit-platform/pkg/types"
 	"github.com/dev-nathaniel/Adroit-platform/pkg/vault"
 )
@@ -36,11 +40,19 @@ func WithSecretStore(store vault.SecretStore) Option {
 	}
 }
 
+// WithStorageProvider sets the artifact/source storage provider for the service
+func WithStorageProvider(store storage.StorageProvider) Option {
+	return func(s *Service) {
+		s.storage = store
+	}
+}
+
 // Service contains core business logic for projects, services, and environment variables
 type Service struct {
 	repo        Repository
 	publisher   events.Publisher
 	secretStore vault.SecretStore
+	storage     storage.StorageProvider
 }
 
 // NewService creates a new project-service business engine
@@ -52,6 +64,9 @@ func NewService(repo Repository, opts ...Option) *Service {
 	}
 	for _, opt := range opts {
 		opt(s)
+	}
+	if s.storage == nil {
+		s.storage = storage.NewStorageProviderFromEnv("data/uploads/sources", "/api/v1/services")
 	}
 	return s
 }
@@ -241,9 +256,35 @@ func (s *Service) CreateService(ctx context.Context, userID string, req CreateSe
 	if name == "" {
 		return nil, fmt.Errorf("%w: service name is required", ErrInvalidRequest)
 	}
+
+	sourceType := req.SourceType
+	if sourceType == "" {
+		sourceType = types.SourceTypeGit
+	}
+
 	repoURL := strings.TrimSpace(req.RepoURL)
-	if repoURL == "" {
-		return nil, fmt.Errorf("%w: repo_url is required", ErrInvalidRequest)
+	archiveURL := strings.TrimSpace(req.ArchiveURL)
+	imageURL := strings.TrimSpace(req.ImageURL)
+
+	switch sourceType {
+	case types.SourceTypeGit:
+		if repoURL == "" {
+			return nil, fmt.Errorf("%w: repo_url is required for git source type", ErrInvalidRequest)
+		}
+	case types.SourceTypeImage:
+		if imageURL == "" && repoURL != "" {
+			imageURL = repoURL
+		}
+		if imageURL == "" {
+			return nil, fmt.Errorf("%w: image_url is required for image source type", ErrInvalidRequest)
+		}
+	case types.SourceTypeArchive:
+		if archiveURL == "" && repoURL != "" && (strings.HasPrefix(repoURL, "http://") || strings.HasPrefix(repoURL, "https://")) {
+			archiveURL = repoURL
+		}
+		// Note: archive_url can be initially empty, uploaded subsequently via /upload endpoint
+	default:
+		return nil, fmt.Errorf("%w: invalid source_type '%s', allowed: git, archive, image", ErrInvalidRequest, sourceType)
 	}
 
 	// Verify org membership
@@ -326,7 +367,10 @@ func (s *Service) CreateService(ctx context.Context, userID string, req CreateSe
 		Slug:           slug,
 		Type:           sType,
 		RuntimeTier:    rTier,
+		SourceType:     sourceType,
 		RepoURL:        repoURL,
+		ArchiveURL:     archiveURL,
+		ImageURL:       imageURL,
 		Branch:         branch,
 		RootDirectory:  strings.TrimSpace(req.RootDirectory),
 		BuildCommand:   strings.TrimSpace(req.BuildCommand),
@@ -362,7 +406,10 @@ func (s *Service) CreateService(ctx context.Context, userID string, req CreateSe
 			Name:           svc.Name,
 			Slug:           svc.Slug,
 			Type:           string(svc.Type),
+			SourceType:     string(svc.SourceType),
 			RepoURL:        svc.RepoURL,
+			ArchiveURL:     svc.ArchiveURL,
+			ImageURL:       svc.ImageURL,
 			Branch:         svc.Branch,
 		},
 	))
@@ -436,8 +483,17 @@ func (s *Service) UpdateService(ctx context.Context, userID, serviceID string, r
 	if req.RuntimeTier != nil {
 		svc.RuntimeTier = *req.RuntimeTier
 	}
-	if req.RepoURL != nil && strings.TrimSpace(*req.RepoURL) != "" {
+	if req.SourceType != nil {
+		svc.SourceType = *req.SourceType
+	}
+	if req.RepoURL != nil {
 		svc.RepoURL = strings.TrimSpace(*req.RepoURL)
+	}
+	if req.ArchiveURL != nil {
+		svc.ArchiveURL = strings.TrimSpace(*req.ArchiveURL)
+	}
+	if req.ImageURL != nil {
+		svc.ImageURL = strings.TrimSpace(*req.ImageURL)
 	}
 	if req.Branch != nil && strings.TrimSpace(*req.Branch) != "" {
 		svc.Branch = strings.TrimSpace(*req.Branch)
@@ -496,6 +552,127 @@ func (s *Service) UpdateService(ctx context.Context, userID, serviceID string, r
 	))
 
 	return svc, nil
+}
+
+// UploadServiceSource persists a source code archive (.zip, .tar.gz, .tar),
+// updates the service record with the archive URL, and optionally triggers a build.
+func (s *Service) UploadServiceSource(ctx context.Context, userID, serviceID string, filename string, r io.Reader, triggerBuild bool) (*UploadSourceResponse, error) {
+	if strings.TrimSpace(serviceID) == "" {
+		return nil, fmt.Errorf("%w: service_id is required", ErrInvalidRequest)
+	}
+
+	svc, err := s.repo.GetServiceByID(ctx, serviceID)
+	if err != nil {
+		return nil, err
+	}
+
+	if _, err := s.repo.CheckOrgMembership(ctx, svc.OrganizationID, userID); err != nil {
+		return nil, err
+	}
+
+	normalized, err := storage.NormalizeToTarGz(r, filename)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrInvalidRequest, err)
+	}
+
+	key := fmt.Sprintf("%s/%s", svc.ID, normalized.Filename)
+	archiveURL, err := s.storage.Save(ctx, key, bytes.NewReader(normalized.TarGzData))
+	if err != nil {
+		return nil, fmt.Errorf("failed to save archive to storage: %w", err)
+	}
+
+	// Update service with archive source
+	svc.SourceType = types.SourceTypeArchive
+	svc.ArchiveURL = archiveURL
+	svc.UpdatedAt = time.Now().UTC()
+
+	if err := s.repo.UpdateService(ctx, svc); err != nil {
+		return nil, fmt.Errorf("failed to update service source: %w", err)
+	}
+
+	var buildID string
+	if triggerBuild {
+		buildID = uuid.New().String()
+		shortHash := normalized.Checksum
+		if len(shortHash) > 19 {
+			shortHash = shortHash[7:19]
+		}
+		build := &types.Build{
+			ID:          buildID,
+			ServiceID:   svc.ID,
+			CommitHash:  shortHash,
+			Branch:      "archive",
+			Message:     fmt.Sprintf("Archive upload deployment: %s", normalized.Filename),
+			Author:      "user:" + userID,
+			Status:      types.BuildStatusQueued,
+			SourceType:  types.SourceTypeArchive,
+			ArchiveURL:  archiveURL,
+			TriggeredBy: "upload:" + userID,
+			CreatedAt:   time.Now().UTC(),
+		}
+		if bErr := s.repo.CreateBuild(ctx, build); bErr == nil {
+			projID := ""
+			if svc.ProjectID != nil {
+				projID = *svc.ProjectID
+			}
+			_ = s.publisher.Publish(ctx, events.SubjectBuildRequested, events.New(
+				events.SubjectBuildRequested,
+				"project-service",
+				events.BuildRequestedPayload{
+					BuildID:        build.ID,
+					ServiceID:      svc.ID,
+					ProjectID:      projID,
+					SourceType:     string(types.SourceTypeArchive),
+					ArchiveURL:     archiveURL,
+					Branch:         "archive",
+					CommitHash:     shortHash,
+					DockerfilePath: svc.DockerfilePath,
+				},
+			))
+		}
+	}
+
+	return &UploadSourceResponse{
+		ServiceID:  svc.ID,
+		SourceType: types.SourceTypeArchive,
+		ArchiveURL: archiveURL,
+		SizeBytes:  normalized.SizeBytes,
+		Checksum:   normalized.Checksum,
+		BuildID:    buildID,
+		Message:    "Source code bundle uploaded successfully",
+	}, nil
+}
+
+// DownloadServiceSource streams the active archive bundle for a service
+func (s *Service) DownloadServiceSource(ctx context.Context, userID, serviceID string) (io.ReadCloser, int64, string, error) {
+	svc, err := s.repo.GetServiceByID(ctx, serviceID)
+	if err != nil {
+		return nil, 0, "", err
+	}
+
+	if userID != "" {
+		if _, err := s.repo.CheckOrgMembership(ctx, svc.OrganizationID, userID); err != nil {
+			return nil, 0, "", err
+		}
+	}
+
+	if svc.ArchiveURL == "" {
+		return nil, 0, "", fmt.Errorf("%w: service does not have an uploaded archive", ErrNotFound)
+	}
+
+	filename := filepath.Base(svc.ArchiveURL)
+	key := fmt.Sprintf("%s/%s", svc.ID, filename)
+	rc, size, err := s.storage.Open(ctx, key)
+	if err != nil {
+		// Try opening directly by filename
+		rc2, size2, err2 := s.storage.Open(ctx, filename)
+		if err2 != nil {
+			return nil, 0, "", fmt.Errorf("%w: failed to open source archive: %v", ErrNotFound, err)
+		}
+		return rc2, size2, filename, nil
+	}
+
+	return rc, size, filename, nil
 }
 
 // MoveService moves a service to a different project or detaches it into a standalone service

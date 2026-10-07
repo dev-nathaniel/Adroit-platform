@@ -32,21 +32,24 @@ type CreateServiceRequest struct {
 	ProjectID       *string           `json:"project_id,omitempty"` // nil/omitted -> standalone service
 	Name            string            `json:"name"`
 	Slug            string            `json:"slug,omitempty"`
-	Type            types.ServiceType `json:"type,omitempty"`         // web, worker, cron, static_site, private
-	RuntimeTier     types.RuntimeTier `json:"runtime_tier,omitempty"`  // general, isolated, high_memory, gpu
-	RepoURL         string            `json:"repo_url"`
-	Branch          string            `json:"branch,omitempty"`
-	RootDirectory   string            `json:"root_directory,omitempty"`
-	BuildCommand    string            `json:"build_command,omitempty"`
-	StartCommand    string            `json:"start_command,omitempty"`
-	DockerfilePath  string            `json:"dockerfile_path,omitempty"`
-	Port            int               `json:"port,omitempty"`
-	MinReplicas     int               `json:"min_replicas,omitempty"`
-	MaxReplicas     int               `json:"max_replicas,omitempty"`
-	CPUCores        float64           `json:"cpu_cores,omitempty"`
-	MemoryMB        int               `json:"memory_mb,omitempty"`
-	DiskMB          int               `json:"disk_mb,omitempty"`
-	HealthCheckPath string            `json:"health_check_path,omitempty"`
+	Type            types.ServiceType  `json:"type,omitempty"`         // web, worker, cron, static_site, private
+	RuntimeTier     types.RuntimeTier  `json:"runtime_tier,omitempty"`  // general, isolated, high_memory, gpu
+	SourceType      types.SourceType   `json:"source_type,omitempty"`   // git, archive, image
+	RepoURL         string             `json:"repo_url,omitempty"`
+	ArchiveURL      string             `json:"archive_url,omitempty"`
+	ImageURL        string             `json:"image_url,omitempty"`
+	Branch          string             `json:"branch,omitempty"`
+	RootDirectory   string             `json:"root_directory,omitempty"`
+	BuildCommand    string             `json:"build_command,omitempty"`
+	StartCommand    string             `json:"start_command,omitempty"`
+	DockerfilePath  string             `json:"dockerfile_path,omitempty"`
+	Port            int                `json:"port,omitempty"`
+	MinReplicas     int                `json:"min_replicas,omitempty"`
+	MaxReplicas     int                `json:"max_replicas,omitempty"`
+	CPUCores        float64            `json:"cpu_cores,omitempty"`
+	MemoryMB        int                `json:"memory_mb,omitempty"`
+	DiskMB          int                `json:"disk_mb,omitempty"`
+	HealthCheckPath string             `json:"health_check_path,omitempty"`
 }
 
 // UpdateServiceRequest holds mutable service fields
@@ -55,7 +58,10 @@ type UpdateServiceRequest struct {
 	Slug            *string            `json:"slug,omitempty"`
 	Type            *types.ServiceType `json:"type,omitempty"`
 	RuntimeTier     *types.RuntimeTier `json:"runtime_tier,omitempty"`
+	SourceType      *types.SourceType  `json:"source_type,omitempty"`
 	RepoURL         *string            `json:"repo_url,omitempty"`
+	ArchiveURL      *string            `json:"archive_url,omitempty"`
+	ImageURL        *string            `json:"image_url,omitempty"`
 	Branch          *string            `json:"branch,omitempty"`
 	RootDirectory   *string            `json:"root_directory,omitempty"`
 	BuildCommand    *string            `json:"build_command,omitempty"`
@@ -68,6 +74,17 @@ type UpdateServiceRequest struct {
 	MemoryMB        *int               `json:"memory_mb,omitempty"`
 	DiskMB          *int               `json:"disk_mb,omitempty"`
 	HealthCheckPath *string            `json:"health_check_path,omitempty"`
+}
+
+// UploadSourceResponse describes the result of uploading a source code archive
+type UploadSourceResponse struct {
+	ServiceID  string           `json:"service_id"`
+	SourceType types.SourceType `json:"source_type"`
+	ArchiveURL string           `json:"archive_url"`
+	SizeBytes  int64            `json:"size_bytes"`
+	Checksum   string           `json:"checksum"`
+	BuildID    string           `json:"build_id,omitempty"`
+	Message    string           `json:"message"`
 }
 
 // MoveServiceRequest specifies target project (or nil to convert to standalone)

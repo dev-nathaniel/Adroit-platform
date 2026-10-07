@@ -13,6 +13,8 @@ The **Project & Service Catalog** manages projects, workloads (services), and en
 Key capabilities:
 * **Projects Management:** Group services, workloads, and shared environment configurations under named projects within an organization.
 * **Standalone Services:** Services can be created directly inside an organization without being assigned to a project (`project_id = null`).
+* **Multi-Source Workload Support:** Supports GitOps (`source_type: "git"`), Archive/CLI folder uploads (`source_type: "archive"`), and Pre-built container images (`source_type: "image"`).
+* **Archive Upload & Normalization:** Ingests `.zip` and `.tar.gz` archives, normalizes them into standard `.tar.gz`, calculates SHA-256 digests, and stores them in pluggable storage backends (Local, S3, Cloudflare R2, MinIO).
 * **Dynamic Workload Reassignment:** Services can be smoothly moved into a project, transferred between projects, or detached back into standalone services via `POST /api/v1/services/{id}/move`.
 * **Multi-Tenant Cross-Org Security:** Prevents moving services across different organizations.
 * **Environment Variables Management:** Manage secrets and environment variables at both the service and project levels, with hierarchical resolution (service variables override project-level variables).
@@ -37,6 +39,15 @@ Key capabilities:
 | `NATS_URL` | String | `nats://localhost:4222` | NATS JetStream server address |
 | `VAULT_ADDR` | String | `http://127.0.0.1:8200` | HashiCorp Vault server address |
 | `VAULT_TOKEN` | String | `adroit-dev-root-token` | HashiCorp Vault authentication token |
+| `STORAGE_BACKEND` | String | `local` | Source archive storage provider: `local`, `s3`, or `memory` |
+| `STORAGE_LOCAL_DIR` | String | `data/uploads/sources` | Storage directory for local filesystem backend |
+| `STORAGE_BASE_URL` | String | `/api/v1/services/source/download` | Base download URL prefix |
+| `STORAGE_S3_ENDPOINT` | String | *(empty)* | Custom S3 endpoint (e.g. MinIO or Cloudflare R2) |
+| `STORAGE_S3_REGION` | String | `us-east-1` | S3 region or `auto` for Cloudflare R2 |
+| `STORAGE_S3_BUCKET` | String | `adroit-sources` | Target S3 bucket name |
+| `STORAGE_S3_ACCESS_KEY`| String | *(empty)* | AWS / R2 / MinIO access key |
+| `STORAGE_S3_SECRET_KEY`| String | *(empty)* | AWS / R2 / MinIO secret key |
+| `STORAGE_S3_USE_PATH_STYLE` | Boolean | `false` | Enable path-style S3 routing (required for MinIO) |
 
 ---
 
@@ -93,10 +104,12 @@ All routes (except `/healthz`) require a valid Bearer JWT token in the `Authoriz
 
 | Method | Path | Auth | Description |
 | :--- | :--- | :--- | :--- |
-| `POST` | `/api/v1/services` | Bearer JWT | Create service (`project_id` optional; standalone if omitted) |
+| `POST` | `/api/v1/services` | Bearer JWT | Create service (`source_type`: `git`, `archive`, `image`) |
 | `GET` | `/api/v1/services` | Bearer JWT | List services (query: `organization_id`, `project_id`, `standalone=true`) |
 | `GET` | `/api/v1/services/{id}` | Bearer JWT | Get service details |
-| `PATCH` | `/api/v1/services/{id}` | Bearer JWT | Update service configuration (specs, commands, resources) |
+| `PATCH` | `/api/v1/services/{id}` | Bearer JWT | Update service configuration (specs, commands, resources, image_url) |
+| `POST` | `/api/v1/services/{id}/upload` | Bearer JWT | Upload source archive (`.zip` / `.tar.gz`), optional `?trigger_build=true` |
+| `GET` | `/api/v1/services/{id}/source/download` | Public / Gateway | Stream normalized `.tar.gz` source code archive for BuildKit or client |
 | `POST` | `/api/v1/services/{id}/move` | Bearer JWT | Move service to target project or detach to standalone (`{"project_id": null}`) |
 | `DELETE` | `/api/v1/services/{id}` | Bearer JWT | Delete service |
 | `GET` | `/api/v1/services/{id}/env` | Bearer JWT | List service env vars (or `?resolved=true` for project+service merged view; secrets masked) |
@@ -126,4 +139,17 @@ All routes (except `/healthz`) require a valid Bearer JWT token in the `Authoriz
 * **Variable Scoping (`scope`):** Supports `runtime` (default for secrets), `build`, and `all`. BuildKit only accesses variables where `scope IN ('build', 'all')`, ensuring runtime secrets are never baked into container image layers.
 * **Target Environments (`target_env`):** Supports `all`, `production`, `staging`, `preview`, `development`.
 * **Offline Resiliency:** When Vault is unreachable during local development, the service falls back gracefully to `SimulatedSecretStore`.
+
+---
+
+## 8. Service Source Types & Validation Rules
+
+Adroit supports 3 source modes configured by `source_type`:
+
+| `source_type` | Required Fields | Optional Fields | Description |
+| :--- | :--- | :--- | :--- |
+| **`git`** (default) | `repo_url` | `branch`, `build_command`, `dockerfile_path` | Connected to a remote Git repository (GitHub/GitLab). Triggered via webhooks or manual builds. |
+| **`archive`** | *(none at creation)* | `build_command`, `dockerfile_path` | Deployed via CLI folder uploads or CI artifacts. User uploads source archive via `POST /services/{id}/upload`. Build can be auto-triggered on upload via `?trigger_build=true`. |
+| **`image`** | `image_url` | `port`, `env_vars`, `resources` | Directly references an existing Docker / OCI container image (e.g. `redis:7-alpine`, `postgres:16`, `ghcr.io/org/app:v1.0`). **Bypasses Build Service** entirely and deploys directly to Nomad via Orchestration Service. |
+
 

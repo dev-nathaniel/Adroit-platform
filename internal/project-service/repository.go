@@ -40,6 +40,7 @@ type Repository interface {
 	UpdateService(ctx context.Context, s *types.Service) error
 	MoveService(ctx context.Context, serviceID string, newProjectID *string) error
 	DeleteService(ctx context.Context, id string) error
+	CreateBuild(ctx context.Context, b *types.Build) error
 
 	SetServiceEnvVars(ctx context.Context, orgID, serviceID string, vars []EnvVarItem) error
 	GetServiceEnvVars(ctx context.Context, serviceID string) ([]types.EnvironmentVariable, error)
@@ -250,21 +251,40 @@ func (r *PostgresRepository) CreateService(ctx context.Context, s *types.Service
 	query := `
 		INSERT INTO services (
 			id, organization_id, project_id, name, slug, type, runtime_tier,
-			repo_url, branch, root_directory, build_command, start_command,
-			dockerfile_path, port, min_replicas, max_replicas, cpu_cores,
-			memory_mb, disk_mb, health_check_path, created_at, updated_at
+			source_type, repo_url, archive_url, image_url, branch, root_directory,
+			build_command, start_command, dockerfile_path, port, min_replicas,
+			max_replicas, cpu_cores, memory_mb, disk_mb, health_check_path,
+			created_at, updated_at
 		) VALUES (
 			$1, $2, $3, $4, $5, $6, $7,
-			$8, $9, $10, $11, $12,
-			$13, $14, $15, $16, $17,
-			$18, $19, $20, $21, $22
+			$8, $9, $10, $11, $12, $13,
+			$14, $15, $16, $17, $18,
+			$19, $20, $21, $22, $23,
+			$24, $25
 		)
 	`
+	srcType := string(s.SourceType)
+	if srcType == "" {
+		srcType = string(types.SourceTypeGit)
+	}
+
+	var repoURL, archiveURL, imageURL sql.NullString
+	if s.RepoURL != "" {
+		repoURL = sql.NullString{String: s.RepoURL, Valid: true}
+	}
+	if s.ArchiveURL != "" {
+		archiveURL = sql.NullString{String: s.ArchiveURL, Valid: true}
+	}
+	if s.ImageURL != "" {
+		imageURL = sql.NullString{String: s.ImageURL, Valid: true}
+	}
+
 	_, err := r.db.ExecContext(ctx, query,
 		s.ID, s.OrganizationID, s.ProjectID, s.Name, s.Slug, string(s.Type), string(s.RuntimeTier),
-		s.RepoURL, s.Branch, s.RootDirectory, s.BuildCommand, s.StartCommand,
-		s.DockerfilePath, s.Port, s.MinReplicas, s.MaxReplicas, s.Resources.CPUCores,
-		s.Resources.MemoryMB, s.Resources.DiskMB, s.HealthCheck.Path, s.CreatedAt, s.UpdatedAt,
+		srcType, repoURL, archiveURL, imageURL, s.Branch, s.RootDirectory,
+		s.BuildCommand, s.StartCommand, s.DockerfilePath, s.Port, s.MinReplicas,
+		s.MaxReplicas, s.Resources.CPUCores, s.Resources.MemoryMB, s.Resources.DiskMB,
+		s.HealthCheck.Path, s.CreatedAt, s.UpdatedAt,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to create service: %w", err)
@@ -276,7 +296,9 @@ func (r *PostgresRepository) CreateService(ctx context.Context, s *types.Service
 func (r *PostgresRepository) GetServiceByID(ctx context.Context, id string) (*types.Service, error) {
 	query := `
 		SELECT id, organization_id, project_id, name, slug, type, runtime_tier,
-		       repo_url, branch, root_directory, build_command, start_command,
+		       COALESCE(source_type, 'git'), COALESCE(repo_url, ''),
+		       COALESCE(archive_url, ''), COALESCE(image_url, ''),
+		       branch, root_directory, build_command, start_command,
 		       dockerfile_path, port, min_replicas, max_replicas, cpu_cores,
 		       memory_mb, disk_mb, health_check_path, created_at, updated_at
 		FROM services
@@ -284,11 +306,12 @@ func (r *PostgresRepository) GetServiceByID(ctx context.Context, id string) (*ty
 	`
 	var s types.Service
 	var projID, rootDir, buildCmd, startCmd, dockerPath, healthPath sql.NullString
-	var sType, rTier string
+	var sType, rTier, srcType, repoURL, archiveURL, imageURL string
 
 	err := r.db.QueryRowContext(ctx, query, id).Scan(
 		&s.ID, &s.OrganizationID, &projID, &s.Name, &s.Slug, &sType, &rTier,
-		&s.RepoURL, &s.Branch, &rootDir, &buildCmd, &startCmd,
+		&srcType, &repoURL, &archiveURL, &imageURL,
+		&s.Branch, &rootDir, &buildCmd, &startCmd,
 		&dockerPath, &s.Port, &s.MinReplicas, &s.MaxReplicas, &s.Resources.CPUCores,
 		&s.Resources.MemoryMB, &s.Resources.DiskMB, &healthPath, &s.CreatedAt, &s.UpdatedAt,
 	)
@@ -305,6 +328,10 @@ func (r *PostgresRepository) GetServiceByID(ctx context.Context, id string) (*ty
 	}
 	s.Type = types.ServiceType(sType)
 	s.RuntimeTier = types.RuntimeTier(rTier)
+	s.SourceType = types.SourceType(srcType)
+	s.RepoURL = repoURL
+	s.ArchiveURL = archiveURL
+	s.ImageURL = imageURL
 	if rootDir.Valid {
 		s.RootDirectory = rootDir.String
 	}
@@ -328,7 +355,9 @@ func (r *PostgresRepository) GetServiceByID(ctx context.Context, id string) (*ty
 func (r *PostgresRepository) GetServiceBySlug(ctx context.Context, orgID, slug string) (*types.Service, error) {
 	query := `
 		SELECT id, organization_id, project_id, name, slug, type, runtime_tier,
-		       repo_url, branch, root_directory, build_command, start_command,
+		       COALESCE(source_type, 'git'), COALESCE(repo_url, ''),
+		       COALESCE(archive_url, ''), COALESCE(image_url, ''),
+		       branch, root_directory, build_command, start_command,
 		       dockerfile_path, port, min_replicas, max_replicas, cpu_cores,
 		       memory_mb, disk_mb, health_check_path, created_at, updated_at
 		FROM services
@@ -336,11 +365,12 @@ func (r *PostgresRepository) GetServiceBySlug(ctx context.Context, orgID, slug s
 	`
 	var s types.Service
 	var projID, rootDir, buildCmd, startCmd, dockerPath, healthPath sql.NullString
-	var sType, rTier string
+	var sType, rTier, srcType, repoURL, archiveURL, imageURL string
 
 	err := r.db.QueryRowContext(ctx, query, orgID, slug).Scan(
 		&s.ID, &s.OrganizationID, &projID, &s.Name, &s.Slug, &sType, &rTier,
-		&s.RepoURL, &s.Branch, &rootDir, &buildCmd, &startCmd,
+		&srcType, &repoURL, &archiveURL, &imageURL,
+		&s.Branch, &rootDir, &buildCmd, &startCmd,
 		&dockerPath, &s.Port, &s.MinReplicas, &s.MaxReplicas, &s.Resources.CPUCores,
 		&s.Resources.MemoryMB, &s.Resources.DiskMB, &healthPath, &s.CreatedAt, &s.UpdatedAt,
 	)
@@ -357,6 +387,10 @@ func (r *PostgresRepository) GetServiceBySlug(ctx context.Context, orgID, slug s
 	}
 	s.Type = types.ServiceType(sType)
 	s.RuntimeTier = types.RuntimeTier(rTier)
+	s.SourceType = types.SourceType(srcType)
+	s.RepoURL = repoURL
+	s.ArchiveURL = archiveURL
+	s.ImageURL = imageURL
 	if rootDir.Valid {
 		s.RootDirectory = rootDir.String
 	}
@@ -384,7 +418,9 @@ func (r *PostgresRepository) ListServices(ctx context.Context, orgID string, pro
 	if standaloneOnly {
 		query = `
 			SELECT id, organization_id, project_id, name, slug, type, runtime_tier,
-			       repo_url, branch, root_directory, build_command, start_command,
+			       COALESCE(source_type, 'git'), COALESCE(repo_url, ''),
+			       COALESCE(archive_url, ''), COALESCE(image_url, ''),
+			       branch, root_directory, build_command, start_command,
 			       dockerfile_path, port, min_replicas, max_replicas, cpu_cores,
 			       memory_mb, disk_mb, health_check_path, created_at, updated_at
 			FROM services
@@ -395,7 +431,9 @@ func (r *PostgresRepository) ListServices(ctx context.Context, orgID string, pro
 	} else if projectID != nil && *projectID != "" {
 		query = `
 			SELECT id, organization_id, project_id, name, slug, type, runtime_tier,
-			       repo_url, branch, root_directory, build_command, start_command,
+			       COALESCE(source_type, 'git'), COALESCE(repo_url, ''),
+			       COALESCE(archive_url, ''), COALESCE(image_url, ''),
+			       branch, root_directory, build_command, start_command,
 			       dockerfile_path, port, min_replicas, max_replicas, cpu_cores,
 			       memory_mb, disk_mb, health_check_path, created_at, updated_at
 			FROM services
@@ -406,7 +444,9 @@ func (r *PostgresRepository) ListServices(ctx context.Context, orgID string, pro
 	} else {
 		query = `
 			SELECT id, organization_id, project_id, name, slug, type, runtime_tier,
-			       repo_url, branch, root_directory, build_command, start_command,
+			       COALESCE(source_type, 'git'), COALESCE(repo_url, ''),
+			       COALESCE(archive_url, ''), COALESCE(image_url, ''),
+			       branch, root_directory, build_command, start_command,
 			       dockerfile_path, port, min_replicas, max_replicas, cpu_cores,
 			       memory_mb, disk_mb, health_check_path, created_at, updated_at
 			FROM services
@@ -426,11 +466,12 @@ func (r *PostgresRepository) ListServices(ctx context.Context, orgID string, pro
 	for rows.Next() {
 		var s types.Service
 		var projID, rootDir, buildCmd, startCmd, dockerPath, healthPath sql.NullString
-		var sType, rTier string
+		var sType, rTier, srcType, repoURL, archiveURL, imageURL string
 
 		if err := rows.Scan(
 			&s.ID, &s.OrganizationID, &projID, &s.Name, &s.Slug, &sType, &rTier,
-			&s.RepoURL, &s.Branch, &rootDir, &buildCmd, &startCmd,
+			&srcType, &repoURL, &archiveURL, &imageURL,
+			&s.Branch, &rootDir, &buildCmd, &startCmd,
 			&dockerPath, &s.Port, &s.MinReplicas, &s.MaxReplicas, &s.Resources.CPUCores,
 			&s.Resources.MemoryMB, &s.Resources.DiskMB, &healthPath, &s.CreatedAt, &s.UpdatedAt,
 		); err != nil {
@@ -443,6 +484,10 @@ func (r *PostgresRepository) ListServices(ctx context.Context, orgID string, pro
 		}
 		s.Type = types.ServiceType(sType)
 		s.RuntimeTier = types.RuntimeTier(rTier)
+		s.SourceType = types.SourceType(srcType)
+		s.RepoURL = repoURL
+		s.ArchiveURL = archiveURL
+		s.ImageURL = imageURL
 		if rootDir.Valid {
 			s.RootDirectory = rootDir.String
 		}
@@ -469,15 +514,33 @@ func (r *PostgresRepository) ListServices(ctx context.Context, orgID string, pro
 func (r *PostgresRepository) UpdateService(ctx context.Context, s *types.Service) error {
 	query := `
 		UPDATE services SET
-			name = $1, slug = $2, type = $3, runtime_tier = $4, repo_url = $5,
-			branch = $6, root_directory = $7, build_command = $8, start_command = $9,
-			dockerfile_path = $10, port = $11, min_replicas = $12, max_replicas = $13,
-			cpu_cores = $14, memory_mb = $15, disk_mb = $16, health_check_path = $17,
-			updated_at = $18
-		WHERE id = $19
+			name = $1, slug = $2, type = $3, runtime_tier = $4,
+			source_type = $5, repo_url = $6, archive_url = $7, image_url = $8,
+			branch = $9, root_directory = $10, build_command = $11, start_command = $12,
+			dockerfile_path = $13, port = $14, min_replicas = $15, max_replicas = $16,
+			cpu_cores = $17, memory_mb = $18, disk_mb = $19, health_check_path = $20,
+			updated_at = $21
+		WHERE id = $22
 	`
+	srcType := string(s.SourceType)
+	if srcType == "" {
+		srcType = string(types.SourceTypeGit)
+	}
+
+	var repoURL, archiveURL, imageURL sql.NullString
+	if s.RepoURL != "" {
+		repoURL = sql.NullString{String: s.RepoURL, Valid: true}
+	}
+	if s.ArchiveURL != "" {
+		archiveURL = sql.NullString{String: s.ArchiveURL, Valid: true}
+	}
+	if s.ImageURL != "" {
+		imageURL = sql.NullString{String: s.ImageURL, Valid: true}
+	}
+
 	res, err := r.db.ExecContext(ctx, query,
-		s.Name, s.Slug, string(s.Type), string(s.RuntimeTier), s.RepoURL,
+		s.Name, s.Slug, string(s.Type), string(s.RuntimeTier),
+		srcType, repoURL, archiveURL, imageURL,
 		s.Branch, s.RootDirectory, s.BuildCommand, s.StartCommand,
 		s.DockerfilePath, s.Port, s.MinReplicas, s.MaxReplicas,
 		s.Resources.CPUCores, s.Resources.MemoryMB, s.Resources.DiskMB, s.HealthCheck.Path,
@@ -492,6 +555,38 @@ func (r *PostgresRepository) UpdateService(ctx context.Context, s *types.Service
 	}
 	if rows == 0 {
 		return ErrNotFound
+	}
+	return nil
+}
+
+// CreateBuild inserts a new build record into the builds table
+func (r *PostgresRepository) CreateBuild(ctx context.Context, b *types.Build) error {
+	query := `
+		INSERT INTO builds (
+			id, service_id, commit_hash, branch, message, author,
+			status, source_type, archive_url, image_tag, image_digest,
+			duration_ms, triggered_by, created_at, finished_at
+		) VALUES (
+			$1, $2, $3, $4, $5, $6,
+			$7, $8, $9, $10, $11,
+			$12, $13, $14, $15
+		)
+	`
+	srcType := string(b.SourceType)
+	if srcType == "" {
+		srcType = "git"
+	}
+	var archiveURL sql.NullString
+	if b.ArchiveURL != "" {
+		archiveURL = sql.NullString{String: b.ArchiveURL, Valid: true}
+	}
+	_, err := r.db.ExecContext(ctx, query,
+		b.ID, b.ServiceID, b.CommitHash, b.Branch, b.Message, b.Author,
+		string(b.Status), srcType, archiveURL, b.ImageTag, b.ImageDigest,
+		b.DurationMs, b.TriggeredBy, b.CreatedAt, b.FinishedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to create build record: %w", err)
 	}
 	return nil
 }

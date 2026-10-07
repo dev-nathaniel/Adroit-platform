@@ -15,6 +15,7 @@ type MockRepository struct {
 	members      map[string]map[string]string // orgID -> userID -> role
 	projects     map[string]*types.Project    // id -> project
 	services     map[string]*types.Service    // id -> service
+	builds       map[string]*types.Build      // id -> build
 	serviceEnvs  map[string]map[string]types.EnvironmentVariable // serviceID -> key -> env
 	projectEnvs  map[string]map[string]types.EnvironmentVariable // projectID -> key -> env
 }
@@ -24,6 +25,7 @@ func NewMockRepository() *MockRepository {
 		members:     make(map[string]map[string]string),
 		projects:    make(map[string]*types.Project),
 		services:    make(map[string]*types.Service),
+		builds:      make(map[string]*types.Build),
 		serviceEnvs: make(map[string]map[string]types.EnvironmentVariable),
 		projectEnvs: make(map[string]map[string]types.EnvironmentVariable),
 	}
@@ -246,6 +248,17 @@ func (m *MockRepository) DeleteService(ctx context.Context, id string) error {
 	}
 	delete(m.services, id)
 	delete(m.serviceEnvs, id)
+	return nil
+}
+
+func (m *MockRepository) CreateBuild(ctx context.Context, b *types.Build) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if b.ID == "" {
+		b.ID = fmt.Sprintf("bld_%d", time.Now().UnixNano())
+	}
+	copyB := *b
+	m.builds[b.ID] = &copyB
 	return nil
 }
 
