@@ -52,7 +52,7 @@ func (r *PostgresRepository) FindMatchingServices(ctx context.Context, repoCanon
 	// Query services where branch matches or branch is blank/main
 	query := `
 		SELECT id, organization_id, project_id, name, slug, type, runtime_tier,
-		       repo_url, branch, root_directory, build_command, start_command,
+		       COALESCE(repo_url, ''), branch, root_directory, build_command, start_command,
 		       dockerfile_path, port, min_replicas, max_replicas, cpu_cores,
 		       memory_mb, disk_mb, health_check_path, webhook_secret, created_at, updated_at
 		FROM services
@@ -142,7 +142,7 @@ func (r *PostgresRepository) FindMatchingServices(ctx context.Context, repoCanon
 func (r *PostgresRepository) GetServiceByID(ctx context.Context, serviceID string) (*types.Service, error) {
 	query := `
 		SELECT id, organization_id, project_id, name, slug, type, runtime_tier,
-		       repo_url, branch, root_directory, build_command, start_command,
+		       COALESCE(repo_url, ''), branch, root_directory, build_command, start_command,
 		       dockerfile_path, port, min_replicas, max_replicas, cpu_cores,
 		       memory_mb, disk_mb, health_check_path, webhook_secret, created_at, updated_at
 		FROM services
