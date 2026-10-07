@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -89,6 +90,13 @@ func (b *NomadBatchBuilder) GenerateJobSpec(cfg BuildConfig) (string, error) {
 		archiveURL := cfg.ArchiveURL
 		if archiveURL == "" {
 			archiveURL = cfg.RepoURL
+		}
+		if strings.HasPrefix(archiveURL, "/") {
+			internalHost := os.Getenv("PROJECT_SERVICE_INTERNAL_URL")
+			if internalHost == "" {
+				internalHost = "http://host.docker.internal:8084"
+			}
+			archiveURL = strings.TrimRight(internalHost, "/") + archiveURL
 		}
 		contextOpt = fmt.Sprintf("context=%s", archiveURL)
 		artifactStanza = fmt.Sprintf(`      artifact {
