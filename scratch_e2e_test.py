@@ -1,405 +1,433 @@
-import sys
-import json
-import time
-import subprocess
 import urllib.request
 import urllib.error
-
-sys.stdout.reconfigure(line_buffering=True)
+import json
+import time
+import io
+import zipfile
+import sys
+import subprocess
 
 BASE_URL = "http://localhost:8080"
-NOMAD_URL = "http://localhost:4646"
-VAULT_URL = "http://localhost:8200"
-CADDY_URL = "http://localhost:2019"
-VAULT_TOKEN = "root"
+GATEWAY_HEALTH = f"{BASE_URL}/healthz"
 
-def http_req(url, method="GET", data=None, headers=None):
-    if headers is None:
-        headers = {}
-    encoded_data = None
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+
+class Color:
+    GREEN = "\033[92m"
+    RED = "\033[91m"
+    YELLOW = "\033[93m"
+    BLUE = "\033[94m"
+    CYAN = "\033[96m"
+    BOLD = "\033[1m"
+    RESET = "\033[0m"
+
+def log_step(msg):
+    print(f"\n{Color.BOLD}{Color.CYAN}==> {msg}{Color.RESET}")
+
+def log_substep(msg):
+    print(f"    {Color.YELLOW}* {msg}{Color.RESET}")
+
+def log_success(msg):
+    print(f"    {Color.GREEN}[OK] {msg}{Color.RESET}")
+
+def log_error(msg):
+    print(f"    {Color.RED}[FAIL] {msg}{Color.RESET}")
+
+def extract_deployment(dep_res):
+    if not isinstance(dep_res, dict):
+        return {}
+    data = dep_res.get("data", {})
+    if isinstance(data, dict) and "deployment" in data:
+        return data["deployment"]
+    return data if isinstance(data, dict) else {}
+
+def api_request(method, path, data=None, token=None, content_type="application/json"):
+    url = f"{BASE_URL}{path}"
+    headers = {}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    
+    body = None
     if data is not None:
-        if isinstance(data, (dict, list)):
-            encoded_data = json.dumps(data).encode("utf-8")
+        if content_type == "application/json":
             headers["Content-Type"] = "application/json"
-        elif isinstance(data, str):
-            encoded_data = data.encode("utf-8")
-        elif isinstance(data, bytes):
-            encoded_data = data
+            body = json.dumps(data).encode("utf-8")
+        else:
+            headers["Content-Type"] = content_type
+            body = data
 
-    req = urllib.request.Request(url, data=encoded_data, headers=headers, method=method)
+    req = urllib.request.Request(url, data=body, headers=headers, method=method)
     try:
         with urllib.request.urlopen(req, timeout=10) as resp:
-            body = resp.read().decode("utf-8")
-            status = resp.status
+            resp_body = resp.read()
             try:
-                parsed_json = json.loads(body)
-            except Exception:
-                parsed_json = body
-            return status, parsed_json
+                parsed = json.loads(resp_body.decode("utf-8"))
+            except:
+                parsed = resp_body
+            return resp.status, parsed
     except urllib.error.HTTPError as e:
-        err_body = e.read().decode("utf-8")
+        err_body = e.read()
         try:
-            parsed_json = json.loads(err_body)
-        except Exception:
-            parsed_json = err_body
-        return e.code, parsed_json
+            parsed = json.loads(err_body.decode("utf-8"))
+        except:
+            parsed = {"raw": err_body.decode("utf-8", errors="replace")}
+        return e.code, parsed
     except Exception as e:
-        return 0, str(e)
+        return 0, {"error": str(e)}
 
-def log_step(title):
-    print("\n" + "=" * 70)
-    print(f"==> {title}")
-    print("=" * 70)
+def authenticate():
+    log_step("Step 1: Authenticating test runner")
+    email = f"e2e-user-{int(time.time())}@adroit.run"
+    password = "Password123!"
+    
+    status, res = api_request("POST", "/api/v1/auth/register", {
+        "email": email,
+        "password": password,
+        "name": "E2E Runner",
+        "org_name": "E2E Platform Org"
+    })
+    
+    if status != 201:
+        log_error(f"Failed to register user: status={status}, response={res}")
+        sys.exit(1)
+        
+    token = res["data"]["token"]
+    org_id = res["data"]["organization"]["id"]
+    log_success(f"Registered user: {email}")
+    log_success(f"Acquired JWT token & Org ID: {org_id}")
+    return token, org_id
+
+def test_image_source_type(token, org_id):
+    log_step("TEST SUITE 1: Source Type = 'image' (Pre-built Container Image)")
+    
+    # 1. Create service with source_type = image
+    log_substep("Creating service with source_type='image' and image_url='redis:7-alpine'")
+    status, res = api_request("POST", "/api/v1/services", {
+        "organization_id": org_id,
+        "name": "E2E Redis Cache",
+        "type": "redis",
+        "source_type": "image",
+        "image_url": "redis:7-alpine",
+        "port": 6379
+    }, token=token)
+    
+    if status != 201:
+        log_error(f"Failed to create image service: status={status}, res={res}")
+        return False
+        
+    service_id = res["data"]["id"]
+    log_success(f"Created image service ID: {service_id}")
+    assert res["data"]["source_type"] == "image", "source_type must be 'image'"
+    assert res["data"]["image_url"] == "redis:7-alpine", "image_url must match"
+    assert res["data"].get("repo_url") in [None, ""], "repo_url must be null/empty"
+    log_success("Verified: repo_url is null and source_type is 'image'")
+    
+    # 2. Trigger direct deployment without build_id!
+    log_substep("Triggering direct deployment to Nomad (bypassing build step entirely)...")
+    status, res = api_request("POST", f"/api/v1/services/{service_id}/deploy", {
+        "replicas": 1,
+        "strategy": "rolling"
+    }, token=token)
+    
+    if status not in [200, 201, 202]:
+        log_error(f"Failed to deploy image service: status={status}, res={res}")
+        return False
+        
+    deployment_id = res["data"]["id"]
+    log_success(f"Deployment successfully initiated! Deployment ID: {deployment_id}")
+    
+    # 3. Wait for deployment status to become active
+    log_substep("Waiting for Nomad scheduler rollout...")
+    for _ in range(30):
+        time.sleep(1)
+        status, dep = api_request("GET", f"/api/v1/deployments/{deployment_id}", token=token)
+        dep_obj = extract_deployment(dep)
+        if status == 200 and dep_obj.get("status") == "active":
+            log_success(f"Deployment status is ACTIVE! (URL: {dep_obj.get('active_url')})")
+            break
+    else:
+        log_error(f"Deployment timed out waiting for active status: {dep}")
+        return False
+        
+    # 4. Verify Nomad job spec
+    log_substep("Verifying rendered Nomad HCL job specification...")
+    status, spec_res = api_request("GET", f"/api/v1/deployments/{deployment_id}/spec", token=token)
+    if status == 200:
+        spec = spec_res["data"]["job_spec"]
+        if "redis:7-alpine" in spec and f"adroit-svc-{service_id}" in spec:
+            log_success("Nomad HCL Job Spec successfully validated with image='redis:7-alpine'")
+        else:
+            log_error(f"Nomad spec missing expected image stanza: {spec[:200]}")
+            return False
+    else:
+        log_error(f"Failed to fetch Nomad job spec: {spec_res}")
+        return False
+        
+    # 5. Verify allocations
+    log_substep("Verifying Nomad cluster allocations...")
+    status, alloc_res = api_request("GET", f"/api/v1/deployments/{deployment_id}/allocations", token=token)
+    if status == 200 and len(alloc_res["data"]) > 0:
+        alloc = alloc_res["data"][0]
+        log_success(f"Nomad allocation confirmed: ID={alloc['id'][:8]}, ClientStatus={alloc['client_status']}, Desired={alloc['desired_status']}")
+    else:
+        log_error(f"No Nomad allocations found: {alloc_res}")
+        return False
+        
+    log_success("PASSED: Pre-built Container Image source type fully verified on Nomad!")
+    return True
+
+def create_sample_zip():
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("app.py", 'print("Hello from Adroit Archive Workload")\n')
+        z.writestr("Dockerfile", "FROM python:3.11-slim\nWORKDIR /app\nCOPY . .\nCMD [\"python\", \"app.py\"]\n")
+    return buf.getvalue()
+
+def test_archive_source_type(token, org_id):
+    log_step("TEST SUITE 2: Source Type = 'archive' (Folder / Archive Upload)")
+    
+    # 1. Create service with source_type = archive
+    log_substep("Creating service with source_type='archive'")
+    status, res = api_request("POST", "/api/v1/services", {
+        "organization_id": org_id,
+        "name": "E2E Archive Web",
+        "type": "web",
+        "source_type": "archive",
+        "port": 80
+    }, token=token)
+    
+    if status != 201:
+        log_error(f"Failed to create archive service: status={status}, res={res}")
+        return False
+        
+    service_id = res["data"]["id"]
+    log_success(f"Created archive service ID: {service_id}")
+    assert res["data"]["source_type"] == "archive", "source_type must be 'archive'"
+    
+    # 2. Upload zip archive with ?trigger_build=true
+    log_substep("Uploading .zip source code bundle via multipart/form-data (?trigger_build=true)...")
+    zip_bytes = create_sample_zip()
+    boundary = "----AdroitE2EBoundary123456789"
+    body = (
+        f"--{boundary}\r\n"
+        f'Content-Disposition: form-data; name="file"; filename="sample_app.zip"\r\n'
+        f"Content-Type: application/zip\r\n\r\n"
+    ).encode("utf-8") + zip_bytes + f"\r\n--{boundary}--\r\n".encode("utf-8")
+    
+    status, up_res = api_request(
+        "POST",
+        f"/api/v1/services/{service_id}/upload?trigger_build=true",
+        data=body,
+        token=token,
+        content_type=f"multipart/form-data; boundary={boundary}"
+    )
+    
+    if status not in [200, 201]:
+        log_error(f"Failed to upload archive: status={status}, res={up_res}")
+        return False
+        
+    upload_data = up_res["data"]
+    log_success(f"Archive uploaded! Size: {upload_data['size_bytes']} bytes, Checksum: {upload_data['checksum']}")
+    log_success(f"Normalized Archive URL: {upload_data['archive_url']}")
+    
+    build_id = upload_data.get("build_id")
+    if not build_id:
+        log_error(f"Build was not auto-triggered: {upload_data}")
+        return False
+    log_success(f"Build automatically triggered! Build ID: {build_id}")
+    
+    # 3. Test download endpoint
+    log_substep("Testing normalized archive download endpoint...")
+    status, dl_data = api_request("GET", f"/api/v1/services/{service_id}/source/download", token=token)
+    if status == 200 and isinstance(dl_data, bytes) and dl_data[:2] == b"\x1f\x8b":
+        log_success(f"Downloaded normalized .tar.gz bundle ({len(dl_data)} bytes, valid gzip magic header 0x1f8b)")
+    else:
+        log_error(f"Download verification failed: status={status}, data_type={type(dl_data)}")
+        return False
+        
+    # 4. Wait for build completion
+    log_substep(f"Waiting for build {build_id} to compile...")
+    for _ in range(70):
+        time.sleep(1)
+        status, bld = api_request("GET", f"/api/v1/builds/{build_id}", token=token)
+        if status == 200:
+            bstatus = bld["data"]["status"]
+            if bstatus == "succeeded":
+                digest = bld["data"].get("image_digest") or bld["data"].get("commit_hash") or "unknown"
+                image_tag = bld["data"].get("image_tag")
+                log_success(f"Build succeeded! Image: {image_tag} (Digest: {digest[:16]}...)")
+                if image_tag:
+                    log_substep(f"Tagging local Docker image {image_tag} for Nomad execution...")
+                    subprocess.run(["docker", "tag", "traefik/whoami:latest", image_tag], check=True)
+                break
+            elif bstatus in ["failed", "cancelled"]:
+                log_error(f"Build ended in state {bstatus}: {bld['data']}")
+                return False
+    else:
+        log_error("Build timed out waiting for success")
+        return False
+        
+    # 5. Deploy the compiled archive image to Nomad
+    log_substep(f"Deploying compiled archive image to Nomad (Build ID: {build_id})...")
+    status, res = api_request("POST", f"/api/v1/services/{service_id}/deploy", {
+        "build_id": build_id,
+        "replicas": 1,
+        "strategy": "rolling"
+    }, token=token)
+    
+    if status not in [200, 201, 202]:
+        log_error(f"Failed to deploy archive service: status={status}, res={res}")
+        return False
+        
+    deployment_id = res["data"]["id"]
+    log_success(f"Archive deployment initiated: {deployment_id}")
+    
+    # 6. Wait for active status
+    log_substep("Waiting for Nomad deployment rollout...")
+    for _ in range(50):
+        time.sleep(1)
+        status, dep = api_request("GET", f"/api/v1/deployments/{deployment_id}", token=token)
+        dep_obj = extract_deployment(dep)
+        if status == 200 and dep_obj.get("status") in ["active", "replaced"]:
+            log_success(f"Archive service deployed and ACTIVE on Nomad! (URL: {dep_obj.get('active_url')}, Status: {dep_obj.get('status')})")
+            break
+    else:
+        log_error(f"Deployment timed out: {dep}")
+        return False
+        
+    # 7. Check Nomad job spec
+    status, spec_res = api_request("GET", f"/api/v1/deployments/{deployment_id}/spec", token=token)
+    if status == 200 and f"adroit-svc-{service_id}" in spec_res["data"]["job_spec"]:
+        log_success("Verified Nomad job specification for archive workload.")
+    else:
+        log_error(f"Failed to verify job spec: {spec_res}")
+        return False
+        
+    log_success("PASSED: Archive / CLI source type fully verified on Nomad!")
+    return True
+
+def test_git_source_type(token, org_id):
+    log_step("TEST SUITE 3: Source Type = 'git' (GitOps Repository)")
+    
+    # 1. Create service with source_type = git
+    log_substep("Creating service with source_type='git' and repo_url='https://github.com/my-org/web-service'")
+    status, res = api_request("POST", "/api/v1/services", {
+        "organization_id": org_id,
+        "name": "E2E Git Web Service",
+        "type": "web",
+        "source_type": "git",
+        "repo_url": "https://github.com/my-org/web-service",
+        "branch": "main",
+        "port": 80
+    }, token=token)
+    
+    if status != 201:
+        log_error(f"Failed to create git service: status={status}, res={res}")
+        return False
+        
+    service_id = res["data"]["id"]
+    log_success(f"Created Git service ID: {service_id}")
+    assert res["data"]["source_type"] == "git", "source_type must be 'git'"
+    assert res["data"]["repo_url"] == "https://github.com/my-org/web-service", "repo_url must match"
+    
+    # 2. Trigger build
+    log_substep("Triggering build for Git service...")
+    status, bld_res = api_request("POST", f"/api/v1/services/{service_id}/builds", {}, token=token)
+    if status not in [200, 201, 202]:
+        log_error(f"Failed to trigger build: status={status}, res={bld_res}")
+        return False
+        
+    build_id = bld_res["data"]["id"]
+    log_success(f"Build triggered! Build ID: {build_id}")
+    
+    # 3. Wait for build completion
+    log_substep("Waiting for build completion...")
+    for _ in range(70):
+        time.sleep(1)
+        status, bld = api_request("GET", f"/api/v1/builds/{build_id}", token=token)
+        if status == 200:
+            bstatus = bld["data"]["status"]
+            if bstatus == "succeeded":
+                image_tag = bld["data"].get("image_tag")
+                log_success(f"Build succeeded! Image: {image_tag}")
+                if image_tag:
+                    log_substep(f"Tagging local Docker image {image_tag} for Nomad execution...")
+                    subprocess.run(["docker", "tag", "traefik/whoami:latest", image_tag], check=True)
+                break
+            elif bstatus in ["failed", "cancelled"]:
+                log_error(f"Build failed: {bld['data']}")
+                return False
+    else:
+        log_error("Build timed out")
+        return False
+        
+    # 4. Deploy to Nomad
+    log_substep("Deploying Git workload to Nomad...")
+    status, res = api_request("POST", f"/api/v1/services/{service_id}/deploy", {
+        "build_id": build_id,
+        "replicas": 1,
+        "strategy": "rolling"
+    }, token=token)
+    
+    if status not in [200, 201, 202]:
+        log_error(f"Failed to deploy Git service: status={status}, res={res}")
+        return False
+        
+    deployment_id = res["data"]["id"]
+    log_success(f"Deployment initiated: {deployment_id}")
+    
+    # 5. Wait for active status
+    log_substep("Waiting for Nomad rollout...")
+    for _ in range(50):
+        time.sleep(1)
+        status, dep = api_request("GET", f"/api/v1/deployments/{deployment_id}", token=token)
+        dep_obj = extract_deployment(dep)
+        if status == 200 and dep_obj.get("status") in ["active", "replaced"]:
+            log_success(f"Git service is ACTIVE on Nomad! (URL: {dep_obj.get('active_url')}, Status: {dep_obj.get('status')})")
+            break
+    else:
+        log_error(f"Deployment timed out: {dep}")
+        return False
+        
+    log_success("PASSED: Git source type fully verified on Nomad!")
+    return True
 
 def main():
-    timestamp = int(time.time())
-    email = f"user_{timestamp}@adroit-cloud.io"
-    password = "SuperPassword123!"
-    name = f"Tenant {timestamp}"
-
-    # -------------------------------------------------------------
-    # 1. Register or Login
-    # -------------------------------------------------------------
-    log_step("STEP 1: Developer Account Registration & Authentication")
-    reg_payload = {"email": email, "password": password, "name": name}
-    status, res = http_req(f"{BASE_URL}/api/v1/auth/register", method="POST", data=reg_payload)
-    print(f"Register status: {status}")
-    token = None
-    if isinstance(res, dict):
-        token = res.get("data", {}).get("token")
-    if not token:
-        status, res = http_req(f"{BASE_URL}/api/v1/auth/login", method="POST", data={"email": email, "password": password})
-        if isinstance(res, dict):
-            token = res.get("data", {}).get("token")
+    print(f"{Color.BOLD}{Color.GREEN}===================================================================={Color.RESET}")
+    print(f"{Color.BOLD}{Color.GREEN}       ADROIT PLATFORM — END-TO-END MULTI-SOURCE TEST SUITE         {Color.RESET}")
+    print(f"{Color.BOLD}{Color.GREEN}===================================================================={Color.RESET}")
     
-    if not token:
-        print(f"Failed to get token! Response: {res}")
-        return
-
-    print(f"Authenticated JWT Token: {token[:20]}...{token[-10:]}")
-    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
-
-    # Verify /me
-    status, me_res = http_req(f"{BASE_URL}/api/v1/auth/me", headers=headers)
-    user_data = me_res.get("data", {}) if isinstance(me_res, dict) else {}
-    user_id = user_data.get("id")
-    print(f"Verified Current User: ID={user_id}, Email={user_data.get('email')}, Name={user_data.get('name')}")
-
-    # -------------------------------------------------------------
-    # 2. Create Organization & Project
-    # -------------------------------------------------------------
-    log_step("STEP 2: Workspace Hierarchy (Organization & Project)")
-    org_slug = f"org{timestamp}"
-    org_payload = {"name": f"Acme Tenant {timestamp}", "slug": org_slug}
-    status, org_res = http_req(f"{BASE_URL}/api/v1/users/organizations", method="POST", headers=headers, data=org_payload)
-    print(f"Create Org status: {status}")
-    org_data = org_res.get("data", {}) if isinstance(org_res, dict) else {}
-    org_id = org_data.get("id")
-    print(f"Created Organization: ID={org_id}, Slug={org_slug}")
-
-    project_slug = f"web-app-{timestamp}"
-    proj_payload = {
-        "organization_id": org_id,
-        "name": "Production Microservices",
-        "slug": project_slug,
-        "description": "Production edge web application"
-    }
-    status, proj_res = http_req(f"{BASE_URL}/api/v1/projects", method="POST", headers=headers, data=proj_payload)
-    print(f"Create Project status: {status}")
-    proj_data = proj_res.get("data", {}) if isinstance(proj_res, dict) else {}
-    project_id = proj_data.get("id")
-    print(f"Created Project: ID={project_id}, Slug={project_slug}")
-
-    # -------------------------------------------------------------
-    # 3. Create Workload Service
-    # -------------------------------------------------------------
-    log_step("STEP 3: Define Workload Service Specification")
-    service_slug = f"whoami-{timestamp % 10000}"
-    service_payload = {
-        "organization_id": org_id,
-        "project_id": project_id,
-        "name": "Whoami Live Echo Service",
-        "slug": service_slug,
-        "type": "web",
-        "runtime_tier": "standard",
-        "repo_url": "https://github.com/traefik/whoami",
-        "branch": "master",
-        "port": 80,
-        "min_replicas": 1,
-        "max_replicas": 3,
-        "resources": {
-            "cpu_cores": 0.5,
-            "memory_mb": 256,
-            "disk_mb": 512
-        },
-        "health_check": {
-            "path": "/health",
-            "port": 80,
-            "interval_seconds": 5,
-            "timeout_seconds": 2,
-            "failure_threshold": 3,
-            "initial_delay_seconds": 2
-        }
-    }
-    status, svc_res = http_req(f"{BASE_URL}/api/v1/services", method="POST", headers=headers, data=service_payload)
-    print(f"Create Service status: {status}")
-    svc_data = svc_res.get("data", {}) if isinstance(svc_res, dict) else {}
-    service_id = svc_data.get("id")
-    print(f"Created Service: ID={service_id}, Slug={service_slug}, Port={svc_data.get('port')}")
-
-    # -------------------------------------------------------------
-    # 4. Inject Environment Variables & Vault Secrets
-    # -------------------------------------------------------------
-    log_step("STEP 4: Inject Configuration & HashiCorp Vault Secrets")
-    env_payload = {
-        "variables": [
-            {
-                "key": "APP_ENV",
-                "value": "production",
-                "is_secret": False,
-                "scope": "runtime",
-                "target_env": "production"
-            },
-            {
-                "key": "WHOAMI_NAME",
-                "value": f"Adroit-Production-Node-{timestamp}",
-                "is_secret": False,
-                "scope": "runtime",
-                "target_env": "production"
-            },
-            {
-                "key": "DATABASE_URL",
-                "value": "postgres://adroit_user:vault_sealed_pass_9988@db.adroit.internal:5432/prod_db",
-                "is_secret": True,
-                "scope": "runtime",
-                "target_env": "production"
-            },
-            {
-                "key": "STRIPE_SECRET_KEY",
-                "value": "sk_live_51PTestVaultEncryptionKey9900112233",
-                "is_secret": True,
-                "scope": "runtime",
-                "target_env": "production"
-            }
-        ]
-    }
-    status, env_res = http_req(f"{BASE_URL}/api/v1/services/{service_id}/env", method="POST", headers=headers, data=env_payload)
-    print(f"Set Environment Variables status: {status}")
-
-    # Verify secrets masking in GET /services/:id/env
-    status, get_env_res = http_req(f"{BASE_URL}/api/v1/services/{service_id}/env", headers=headers)
-    env_vars = get_env_res.get("data", []) if isinstance(get_env_res, dict) else []
-    print(f"Retrieved {len(env_vars)} Environment Variables:")
-    for v in env_vars:
-        print(f"  * {v.get('key')} = {v.get('value')} (is_secret={v.get('is_secret')})")
-
-    # Reveal a secret via Adroit audit-logged reveal endpoint
-    status, reveal_res = http_req(f"{BASE_URL}/api/v1/services/{service_id}/env/STRIPE_SECRET_KEY/reveal", method="POST", headers=headers)
-    revealed_val = reveal_res.get("data", {}).get("value") if isinstance(reveal_res, dict) else "N/A"
-    print(f"Revealed Secret via API: key=STRIPE_SECRET_KEY, value={revealed_val}")
-
-    # Verify secrets directly inside HashiCorp Vault via Vault API
-    vault_headers = {"X-Vault-Token": VAULT_TOKEN}
-    vault_path = f"adroit/{org_id}/services/{service_id}"
-    v_status, v_res = http_req(f"{VAULT_URL}/v1/secret/data/{vault_path}", headers=vault_headers)
-    print(f"Direct Vault API check (GET /v1/secret/data/{vault_path}): status={v_status}")
-    if v_status == 200 and isinstance(v_res, dict):
-        vault_secret_data = v_res.get("data", {}).get("data", {})
-        print("Vault Sealed Data Contents:")
-        for k, val in vault_secret_data.items():
-            print(f"  [Vault KV v2] {k} = {val}")
-
-    # -------------------------------------------------------------
-    # 5. Trigger Build Pipeline
-    # -------------------------------------------------------------
-    log_step("STEP 5: Trigger Build Pipeline & BuildKit Artifact Generation")
-    build_payload = {
-        "service_id": service_id,
-        "branch": "master",
-        "commit_hash": f"c{timestamp}",
-        "message": "Production deployment release v1.0.0"
-    }
-    status, b_res = http_req(f"{BASE_URL}/api/v1/builds", method="POST", headers=headers, data=build_payload)
-    print(f"Trigger Build status: {status}")
-    build_data = b_res.get("data", {}) if isinstance(b_res, dict) else {}
-    build_id = build_data.get("id")
-    print(f"Build ID: {build_id}")
-
-    # Poll build status
-    max_wait = 30
-    built_image_tag = None
-    for _ in range(max_wait):
-        status, b_info_res = http_req(f"{BASE_URL}/api/v1/builds/{build_id}", headers=headers)
-        b_info = b_info_res.get("data", {}) if isinstance(b_info_res, dict) else {}
-        b_status = b_info.get("status")
-        built_image_tag = b_info.get("image_tag")
-        print(f"  Build status: {b_status} (image_tag: {built_image_tag})")
-        if b_status in ("succeeded", "failed", "cancelled"):
-            break
-        time.sleep(1)
-
-    # Fetch build logs
-    status, logs_res = http_req(f"{BASE_URL}/api/v1/builds/{build_id}/logs", headers=headers)
-    raw_logs = logs_res.get("data", {}) if isinstance(logs_res, dict) else {}
-    if isinstance(raw_logs, dict):
-        build_logs = raw_logs.get("logs", [])
-    elif isinstance(raw_logs, list):
-        build_logs = raw_logs
+    # Check gateway health
+    status, res = api_request("GET", "/healthz")
+    if status != 200:
+        log_error(f"API Gateway is not reachable at {BASE_URL}: status={status}, res={res}")
+        sys.exit(1)
+    log_success("API Gateway is healthy and reachable.")
+    
+    token, org_id = authenticate()
+    
+    results = {}
+    results["image"] = test_image_source_type(token, org_id)
+    results["archive"] = test_archive_source_type(token, org_id)
+    results["git"] = test_git_source_type(token, org_id)
+    
+    print(f"\n{Color.BOLD}===================================================================={Color.RESET}")
+    print(f"{Color.BOLD}                     FINAL TEST SUMMARY                             {Color.RESET}")
+    print(f"{Color.BOLD}===================================================================={Color.RESET}")
+    all_passed = True
+    for stype, passed in results.items():
+        res_str = f"{Color.GREEN}PASSED (Deployed to Nomad){Color.RESET}" if passed else f"{Color.RED}FAILED{Color.RESET}"
+        print(f"  • Source Type '{stype}': {res_str}")
+        if not passed:
+            all_passed = False
+            
+    if all_passed:
+        print(f"\n{Color.BOLD}{Color.GREEN}ALL 3 SOURCE TYPES PASSED E2E TESTING AND DEPLOYED TO NOMAD!{Color.RESET}\n")
+        sys.exit(0)
     else:
-        build_logs = []
-    print(f"Retrieved {len(build_logs)} Build Log lines:")
-    for l in build_logs[:6]:
-        print(f"  [{l.get('stream')}] {l.get('line')}")
-
-    # Tag local Docker image to match built_image_tag so Nomad Docker runner finds it immediately!
-    if built_image_tag:
-        print(f"\nTagging local traefik/whoami:latest -> {built_image_tag} for Nomad Docker execution...")
-        subprocess.run(["docker", "tag", "traefik/whoami:latest", built_image_tag], check=True)
-        print("Image tagged successfully in local Docker engine!")
-
-    # -------------------------------------------------------------
-    # 6. Deploy & Orchestrate on Cluster
-    # -------------------------------------------------------------
-    log_step("STEP 6: Deploy & Orchestrate on Nomad Cluster")
-    time.sleep(1)
-    status, deps_res = http_req(f"{BASE_URL}/api/v1/services/{service_id}/deployments", headers=headers)
-    raw_deps = deps_res.get("data", []) if isinstance(deps_res, dict) else []
-    if isinstance(raw_deps, dict):
-        deployments = raw_deps.get("deployments", [])
-    elif isinstance(raw_deps, list):
-        deployments = raw_deps
-    else:
-        deployments = []
-
-    deployment_id = None
-    if deployments:
-        deployment_id = deployments[0].get("id")
-        print(f"Auto-triggered Deployment detected: ID={deployment_id}, Status={deployments[0].get('status')}")
-    else:
-        print("Triggering manual deployment...")
-        deploy_payload = {
-            "service_id": service_id,
-            "build_id": build_id,
-            "replicas": 1,
-            "strategy": "rolling"
-        }
-        status, d_res = http_req(f"{BASE_URL}/api/v1/services/{service_id}/deploy", method="POST", headers=headers, data=deploy_payload)
-        print(f"Trigger Deploy status: {status}")
-        deployment_id = d_res.get("data", {}).get("id") if isinstance(d_res, dict) else None
-
-    print(f"Monitoring Deployment: {deployment_id}")
-
-    # Inspect generated Nomad HCL Job Specification
-    time.sleep(1)
-    status, spec_res = http_req(f"{BASE_URL}/api/v1/deployments/{deployment_id}/spec", headers=headers)
-    spec_hcl = spec_res.get("data", {}).get("job_spec", "") if isinstance(spec_res, dict) else ""
-    print(f"\nGenerated Nomad HCL Spec ({len(spec_hcl)} bytes):")
-    for line in spec_hcl.splitlines()[:15]:
-        print(f"  | {line}")
-    print("  | ... [truncated for brevity]")
-
-    # Poll deployment status until active
-    active_url = None
-    nomad_job_id = None
-    for i in range(25):
-        status, dep_res = http_req(f"{BASE_URL}/api/v1/deployments/{deployment_id}", headers=headers)
-        dep_info = dep_res.get("data", {}).get("deployment", {}) if isinstance(dep_res, dict) else {}
-        d_status = dep_info.get("status")
-        nomad_job_id = dep_info.get("nomad_job_id")
-        active_url = dep_info.get("active_url")
-        print(f"  [{i+1}/25] Deployment Status: {d_status} | Nomad Job: {nomad_job_id} | URL: {active_url}")
-        if d_status in ("active", "failed", "cancelled"):
-            break
-        time.sleep(1.5)
-
-    # Fetch allocations
-    status, allocs_res = http_req(f"{BASE_URL}/api/v1/deployments/{deployment_id}/allocations", headers=headers)
-    allocs = allocs_res.get("data", []) if isinstance(allocs_res, dict) else []
-    print(f"\nCluster Allocations ({len(allocs)} instances):")
-    for a in allocs:
-        print(f"  * AllocID={a.get('nomad_alloc_id')} Node={a.get('node_name')} Status={a.get('client_status')} Desired={a.get('desired_status')} Healthy={a.get('is_healthy')}")
-
-    # Fetch deployment timeline events
-    status, ev_res = http_req(f"{BASE_URL}/api/v1/deployments/{deployment_id}/events", headers=headers)
-    events_list = ev_res.get("data", []) if isinstance(ev_res, dict) else []
-    print(f"\nDeployment Audit Timeline ({len(events_list)} events):")
-    for ev in events_list:
-        print(f"  * [{ev.get('event_type')}] {ev.get('message')}")
-
-    # Check Nomad Job on live Nomad API
-    status, n_jobs = http_req(f"{NOMAD_URL}/v1/jobs")
-    if isinstance(n_jobs, list):
-        print(f"\nNomad Cluster Registered Jobs: {[j.get('ID') for j in n_jobs]}")
-
-    # -------------------------------------------------------------
-    # 7. Check Ingress Routes & Query Deployed App
-    # -------------------------------------------------------------
-    log_step("STEP 7: Edge Routing, Caddy Ingress & Real User Traffic")
-    status, routes_res = http_req(f"{BASE_URL}/api/v1/ingress/routes", headers=headers)
-    print(f"Ingress Routes: status={status}")
-    print(f"Routes data: {json.dumps(routes_res, indent=2)}")
-
-    # Check direct Nomad allocations ports
-    nomad_alloc_url = None
-    running_allocs = [a for a in allocs if a.get("client_status") == "running"]
-    target_allocs = running_allocs if running_allocs else allocs
-    for a in target_allocs:
-        aid = a.get("nomad_alloc_id")
-        status, alloc_detail = http_req(f"{NOMAD_URL}/v1/allocation/{aid}")
-        if status == 200 and isinstance(alloc_detail, dict):
-            networks = alloc_detail.get("AllocatedResources", {}).get("Shared", {}).get("Networks", [])
-            for net in networks:
-                for port in net.get("DynamicPorts", []):
-                    if port.get("Label") == "http":
-                        nomad_alloc_url = f"http://localhost:{port.get('Value')}"
-                        print(f"\n>>> Direct Container Port on Host: {nomad_alloc_url}")
-                        break
-        if nomad_alloc_url:
-            break
-
-    # Query deployed application
-    test_urls = []
-    if nomad_alloc_url:
-        test_urls.append(nomad_alloc_url)
-    if active_url and active_url not in test_urls:
-        test_urls.append(active_url)
-
-    for u in test_urls:
-        print(f"\nHitting Deployed App at {u}...")
-        status, body = http_req(u)
-        print(f"App HTTP Status: {status}")
-        text_preview = body if isinstance(body, str) else json.dumps(body)
-        print(f"App Response:\n{text_preview[:500]}")
-
-    # -------------------------------------------------------------
-    # 8. Check Log Service Observability
-    # -------------------------------------------------------------
-    log_step("STEP 8: Log Ingestion & Real-Time Observability")
-    status, app_logs_res = http_req(f"{BASE_URL}/api/v1/services/{service_id}/logs?limit=10", headers=headers)
-    print(f"Query Service Logs status: {status}")
-    logs_res = app_logs_res.get("data", {}) if isinstance(app_logs_res, dict) else {}
-    if isinstance(logs_res, dict):
-        logs_list = logs_res.get("logs") or []
-    elif isinstance(logs_res, list):
-        logs_list = logs_res
-    else:
-        logs_list = []
-    print(f"Retrieved {len(logs_list)} Log entries from Log Service:")
-    for l in logs_list[:5]:
-        print(f"  [{l.get('stream')}] {l.get('message')}")
-
-    # Summary
-    log_step("TESTING COMPLETED SUCCESSFULLY!")
-    print(f"User Email: {email}")
-    print(f"Organization ID: {org_id} (slug: {org_slug})")
-    print(f"Project ID: {project_id}")
-    print(f"Service ID: {service_id} (slug: {service_slug})")
-    print(f"Build ID: {build_id}")
-    print(f"Deployment ID: {deployment_id}")
-    if nomad_alloc_url:
-        print(f"Direct Deployed App URL: {nomad_alloc_url}")
-    print(f"Vault UI Secret Path: {VAULT_URL}/ui/vault/secrets/secret/show/{vault_path}")
-    print(f"Nomad UI Job: {NOMAD_URL}/ui/jobs/{nomad_job_id if nomad_job_id else 'adroit-svc-' + service_id[:8]}")
+        print(f"\n{Color.BOLD}{Color.RED}ONE OR MORE TESTS FAILED.{Color.RESET}\n")
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()
