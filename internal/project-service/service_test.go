@@ -1,10 +1,17 @@
 package projectservice
 
 import (
+	"archive/zip"
+	"bytes"
 	"context"
+	"encoding/json"
+	"io"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/dev-nathaniel/Adroit-platform/pkg/events"
+	"github.com/dev-nathaniel/Adroit-platform/pkg/storage"
 	"github.com/dev-nathaniel/Adroit-platform/pkg/types"
 )
 
@@ -311,5 +318,222 @@ func TestProjectService_EnvironmentVariables(t *testing.T) {
 			t.Errorf("expected non-empty VaultPath in revealed secret response")
 		}
 	})
+}
+
+func createSampleZip(t *testing.T) []byte {
+	buf := new(bytes.Buffer)
+	zw := zip.NewWriter(buf)
+
+	f, err := zw.Create("main.go")
+	if err != nil {
+		t.Fatalf("failed to create zip entry: %v", err)
+	}
+	_, _ = f.Write([]byte("package main\n\nfunc main() {}\n"))
+
+	f2, err := zw.Create("Dockerfile")
+	if err != nil {
+		t.Fatalf("failed to create zip entry: %v", err)
+	}
+	_, _ = f2.Write([]byte("FROM alpine:latest\nCMD [\"echo\", \"hello\"]\n"))
+
+	if err := zw.Close(); err != nil {
+		t.Fatalf("failed to close zip writer: %v", err)
+	}
+	return buf.Bytes()
+}
+
+func TestProjectService_SourceTypesAndValidation(t *testing.T) {
+	ctx := context.Background()
+	svc, repo, _ := setupTestService()
+
+	userID := "usr_src_test"
+	orgID := "org_src_test"
+	repo.AddMember(orgID, userID, "owner")
+
+	t.Run("create image-based service successfully", func(t *testing.T) {
+		s, err := svc.CreateService(ctx, userID, CreateServiceRequest{
+			OrganizationID: orgID,
+			Name:           "Postgres DB",
+			SourceType:     types.SourceTypeImage,
+			ImageURL:       "postgres:16-alpine",
+		})
+		if err != nil {
+			t.Fatalf("unexpected error creating image service: %v", err)
+		}
+		if s.SourceType != types.SourceTypeImage {
+			t.Errorf("expected source_type image, got %s", s.SourceType)
+		}
+		if s.ImageURL != "postgres:16-alpine" {
+			t.Errorf("expected image_url 'postgres:16-alpine', got '%s'", s.ImageURL)
+		}
+		if s.RepoURL != "" {
+			t.Errorf("expected empty repo_url for image service, got '%s'", s.RepoURL)
+		}
+	})
+
+	t.Run("create archive-based service successfully", func(t *testing.T) {
+		s, err := svc.CreateService(ctx, userID, CreateServiceRequest{
+			OrganizationID: orgID,
+			Name:           "Archive Svc",
+			SourceType:     types.SourceTypeArchive,
+			ArchiveURL:     "https://storage.adroit.run/source.tar.gz",
+		})
+		if err != nil {
+			t.Fatalf("unexpected error creating archive service: %v", err)
+		}
+		if s.SourceType != types.SourceTypeArchive {
+			t.Errorf("expected source_type archive, got %s", s.SourceType)
+		}
+		if s.ArchiveURL != "https://storage.adroit.run/source.tar.gz" {
+			t.Errorf("expected archive_url to match, got '%s'", s.ArchiveURL)
+		}
+	})
+
+	t.Run("git service requires repo_url", func(t *testing.T) {
+		_, err := svc.CreateService(ctx, userID, CreateServiceRequest{
+			OrganizationID: orgID,
+			Name:           "Invalid Git Svc",
+			SourceType:     types.SourceTypeGit,
+			RepoURL:        "",
+		})
+		if err == nil {
+			t.Fatalf("expected validation error when repo_url is missing for git service, got nil")
+		}
+		if !strings.Contains(err.Error(), "repo_url is required") {
+			t.Errorf("expected error message to mention repo_url, got %v", err)
+		}
+	})
+
+	t.Run("image service requires image_url", func(t *testing.T) {
+		_, err := svc.CreateService(ctx, userID, CreateServiceRequest{
+			OrganizationID: orgID,
+			Name:           "Invalid Image Svc",
+			SourceType:     types.SourceTypeImage,
+			ImageURL:       "",
+		})
+		if err == nil {
+			t.Fatalf("expected validation error when image_url is missing for image service, got nil")
+		}
+		if !strings.Contains(err.Error(), "image_url is required") {
+			t.Errorf("expected error message to mention image_url, got %v", err)
+		}
+	})
+}
+
+func TestProjectService_UploadAndDownloadSource(t *testing.T) {
+	ctx := context.Background()
+	repo := NewMockRepository()
+	bus := events.NewInMemBus()
+	store := storage.NewInMemStorage("https://storage.adroit.run/artifacts")
+	svc := NewService(repo, WithPublisher(bus), WithStorageProvider(store))
+
+	userID := "usr_uploader"
+	orgID := "org_uploader"
+	repo.AddMember(orgID, userID, "owner")
+
+	// Create service
+	s, err := svc.CreateService(ctx, userID, CreateServiceRequest{
+		OrganizationID: orgID,
+		Name:           "Archive Upload Svc",
+		SourceType:     types.SourceTypeArchive,
+	})
+	if err != nil {
+		t.Fatalf("failed to create service: %v", err)
+	}
+
+	zipBytes := createSampleZip(t)
+
+	// Subscribe to bus
+	var buildRequestedReceived bool
+	var publishedPayload events.BuildRequestedPayload
+	eventReceived := make(chan struct{}, 1)
+	_ = bus.Subscribe(events.SubjectBuildRequested, func(ctx context.Context, subj string, raw []byte) error {
+		var evt events.Event[events.BuildRequestedPayload]
+		_ = json.Unmarshal(raw, &evt)
+		buildRequestedReceived = true
+		publishedPayload = evt.Data
+		select {
+		case eventReceived <- struct{}{}:
+		default:
+		}
+		return nil
+	})
+
+	uploadResp, err := svc.UploadServiceSource(ctx, userID, s.ID, "bundle.zip", bytes.NewReader(zipBytes), true)
+	if err != nil {
+		t.Fatalf("UploadServiceSource failed: %v", err)
+	}
+
+	select {
+	case <-eventReceived:
+	case <-time.After(500 * time.Millisecond):
+	}
+
+	if uploadResp.SourceType != types.SourceTypeArchive {
+		t.Errorf("expected upload response source_type archive, got %s", uploadResp.SourceType)
+	}
+	if uploadResp.ArchiveURL == "" {
+		t.Errorf("expected non-empty archive_url in upload response")
+	}
+	if uploadResp.BuildID == "" {
+		t.Errorf("expected non-empty build_id in upload response")
+	}
+
+	// Verify service updated in repo
+	updatedSvc, err := repo.GetServiceByID(ctx, s.ID)
+	if err != nil {
+		t.Fatalf("failed to get updated service: %v", err)
+	}
+	if updatedSvc.SourceType != types.SourceTypeArchive {
+		t.Errorf("expected service source_type archive, got %s", updatedSvc.SourceType)
+	}
+	if updatedSvc.ArchiveURL != uploadResp.ArchiveURL {
+		t.Errorf("expected service archive_url to match upload response")
+	}
+
+	// Verify build in repo
+	if len(repo.builds) != 1 {
+		t.Fatalf("expected 1 build created in repo, got %d", len(repo.builds))
+	}
+	createdBuild := repo.builds[uploadResp.BuildID]
+	if createdBuild.SourceType != types.SourceTypeArchive {
+		t.Errorf("expected build source_type archive, got %s", createdBuild.SourceType)
+	}
+	if createdBuild.ArchiveURL != uploadResp.ArchiveURL {
+		t.Errorf("expected build archive_url to match")
+	}
+
+	// Verify event bus
+	if !buildRequestedReceived {
+		t.Errorf("expected SubjectBuildRequested event to be published")
+	}
+	if publishedPayload.SourceType != string(types.SourceTypeArchive) {
+		t.Errorf("expected event payload source_type archive, got %s", publishedPayload.SourceType)
+	}
+	if publishedPayload.ArchiveURL != uploadResp.ArchiveURL {
+		t.Errorf("expected event payload archive_url to match")
+	}
+
+	// Test DownloadServiceSource
+	rc, size, filename, err := svc.DownloadServiceSource(ctx, userID, s.ID)
+	if err != nil {
+		t.Fatalf("DownloadServiceSource failed: %v", err)
+	}
+	defer rc.Close()
+
+	if filename != "bundle.tar.gz" {
+		t.Errorf("expected filename bundle.tar.gz, got %s", filename)
+	}
+	if size <= 0 {
+		t.Errorf("expected positive content length, got %d", size)
+	}
+
+	downloadedBytes, err := io.ReadAll(rc)
+	if err != nil {
+		t.Fatalf("failed to read downloaded content: %v", err)
+	}
+	if len(downloadedBytes) != int(size) {
+		t.Errorf("read bytes %d != expected size %d", len(downloadedBytes), size)
+	}
 }
 
