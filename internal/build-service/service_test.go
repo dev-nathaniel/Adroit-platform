@@ -2,6 +2,7 @@ package buildservice
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"sync"
@@ -412,3 +413,146 @@ func TestBuildExecution_Failure(t *testing.T) {
 		t.Errorf("expected SubjectBuildFailed event to be emitted")
 	}
 }
+
+func TestBuildExecution_ImageSource(t *testing.T) {
+	repo := NewMockRepository()
+	bus := events.NewInMemBus()
+
+	userID := "usr_img"
+	orgID := "org_img"
+	serviceID := "svc_img"
+
+	repo.orgMembers[orgID] = map[string]string{userID: "owner"}
+	repo.orgSlugs[orgID] = "acme"
+
+	repo.services[serviceID] = types.Service{
+		ID:             serviceID,
+		OrganizationID: orgID,
+		Name:           "Database",
+		Slug:           "database",
+		SourceType:     types.SourceTypeImage,
+		ImageURL:       "postgres:16-alpine",
+		Port:           5432,
+		MinReplicas:    1,
+		MaxReplicas:    1,
+		Resources: types.ResourceLimits{
+			CPUCores: 0.5,
+			MemoryMB: 512,
+		},
+	}
+
+	// failingBuilder ensures that if the image branch actually tried to invoke BuildKit, it would fail
+	failBld := &failingBuilder{errMsg: "BuildKit should not be called for pre-built image!"}
+	svc := NewService(repo, failBld, ServiceConfig{
+		DefaultBuildTimeout: 5 * time.Second,
+	}, WithEventBus(bus))
+
+	var deployRequestedReceived bool
+	var deployedImageTag string
+	_ = bus.Subscribe(events.SubjectDeployRequested, func(ctx context.Context, subj string, raw []byte) error {
+		var evt events.Event[events.DeployRequestedPayload]
+		_ = json.Unmarshal(raw, &evt)
+		deployRequestedReceived = true
+		deployedImageTag = evt.Data.ImageTag
+		return nil
+	})
+
+	build, err := svc.TriggerBuild(context.Background(), userID, serviceID, TriggerBuildRequest{})
+	if err != nil {
+		t.Fatalf("unexpected error triggering build: %v", err)
+	}
+
+	if build.SourceType != types.SourceTypeImage {
+		t.Errorf("expected build source_type to be image, got %s", build.SourceType)
+	}
+
+	// Wait for worker to finish
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		b, err := repo.GetBuildByID(context.Background(), build.ID)
+		if err == nil && b.Status == types.BuildStatusSucceeded {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	finalBuild, err := repo.GetBuildByID(context.Background(), build.ID)
+	if err != nil {
+		t.Fatalf("failed to get build: %v", err)
+	}
+
+	if finalBuild.Status != types.BuildStatusSucceeded {
+		t.Fatalf("expected build to succeed for image source, got %s (err: %s)", finalBuild.Status, finalBuild.ErrorMessage)
+	}
+	if finalBuild.ImageTag != "postgres:16-alpine" {
+		t.Errorf("expected ImageTag 'postgres:16-alpine', got '%s'", finalBuild.ImageTag)
+	}
+
+	if !deployRequestedReceived {
+		t.Errorf("expected SubjectDeployRequested event to be emitted")
+	}
+	if deployedImageTag != "postgres:16-alpine" {
+		t.Errorf("expected deployed image tag 'postgres:16-alpine', got '%s'", deployedImageTag)
+	}
+}
+
+func TestBuildExecution_ArchiveSource(t *testing.T) {
+	repo := NewMockRepository()
+	bus := events.NewInMemBus()
+
+	userID := "usr_arch"
+	orgID := "org_arch"
+	serviceID := "svc_arch"
+
+	repo.orgMembers[orgID] = map[string]string{userID: "owner"}
+	repo.orgSlugs[orgID] = "acme"
+
+	repo.services[serviceID] = types.Service{
+		ID:             serviceID,
+		OrganizationID: orgID,
+		Name:           "Archive Web",
+		Slug:           "archive-web",
+		SourceType:     types.SourceTypeArchive,
+		ArchiveURL:     "https://storage.adroit.run/source/svc-123.tar.gz",
+		Port:           3000,
+		MinReplicas:    1,
+		MaxReplicas:    2,
+	}
+
+	devBld := builder.NewLocalDevBuilder(0)
+	svc := NewService(repo, devBld, ServiceConfig{
+		DefaultBuildTimeout: 5 * time.Second,
+	}, WithEventBus(bus))
+
+	build, err := svc.TriggerBuild(context.Background(), userID, serviceID, TriggerBuildRequest{})
+	if err != nil {
+		t.Fatalf("unexpected error triggering build: %v", err)
+	}
+
+	if build.SourceType != types.SourceTypeArchive {
+		t.Errorf("expected build source_type archive, got %s", build.SourceType)
+	}
+	if build.ArchiveURL != "https://storage.adroit.run/source/svc-123.tar.gz" {
+		t.Errorf("expected build archive_url to match service, got %s", build.ArchiveURL)
+	}
+
+	// Wait for worker to finish
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		b, err := repo.GetBuildByID(context.Background(), build.ID)
+		if err == nil && b.Status == types.BuildStatusSucceeded {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	finalBuild, err := repo.GetBuildByID(context.Background(), build.ID)
+	if err != nil {
+		t.Fatalf("failed to get build: %v", err)
+	}
+
+	if finalBuild.Status != types.BuildStatusSucceeded {
+		t.Fatalf("expected build to succeed for archive source, got %s (err: %s)", finalBuild.Status, finalBuild.ErrorMessage)
+	}
+}
+

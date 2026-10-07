@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/dev-nathaniel/Adroit-platform/pkg/types"
 )
 
 var (
@@ -24,9 +26,12 @@ type BuildConfig struct {
 	ServiceName    string            `json:"service_name"`
 	ServiceSlug    string            `json:"service_slug"`
 	OrgSlug        string            `json:"org_slug"`
-	RepoURL        string            `json:"repo_url"`
-	Branch         string            `json:"branch"`
-	CommitHash     string            `json:"commit_hash"`
+	SourceType     types.SourceType  `json:"source_type,omitempty"`
+	RepoURL        string            `json:"repo_url,omitempty"`
+	ArchiveURL     string            `json:"archive_url,omitempty"`
+	ImageURL       string            `json:"image_url,omitempty"`
+	Branch         string            `json:"branch,omitempty"`
+	CommitHash     string            `json:"commit_hash,omitempty"`
 	DockerfilePath string            `json:"dockerfile_path,omitempty"`
 	BuildCommand   string            `json:"build_command,omitempty"`
 	RootDirectory  string            `json:"root_directory,omitempty"`

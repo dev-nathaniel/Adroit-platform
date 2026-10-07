@@ -7,14 +7,18 @@ The **Build Service** manages the artifact creation lifecycle within the Adroit 
 ## 1. Core Architecture
 
 ```
-                                Git Push / Webhook
-                                        │
-                                        ▼
-                           ┌─────────────────────────┐
-                           │ git-integration-service │
-                           └────────────┬────────────┘
-                                        │ (adroit.build.requested)
-                                        ▼
+         Git Push / Webhook               Folder / Archive Upload
+                 │                                   │
+                 ▼                                   ▼
+   ┌─────────────────────────┐         ┌─────────────────────────┐
+   │ git-integration-service │         │     project-service     │
+   └────────────┬────────────┘         │ (POST /services/:id/up) │
+                │                      └────────────┬────────────┘
+                │ (Git Repo Context)                │ (HTTP Tarball Context)
+                │                                   │
+                └─────────────────┬─────────────────┘
+                                  │ (adroit.build.requested: RepoURL or ArchiveURL)
+                                  ▼
    ┌────────────────────────────────────────────────────────────────────────┐
    │                       Adroit API Gateway (:8080)                       │
    │                /api/v1/builds  |  /api/v1/services/{id}/builds         │
@@ -26,8 +30,8 @@ The **Build Service** manages the artifact creation lifecycle within the Adroit 
    │                                                                        │
    │   1. Build Lifecycle Management (queued -> building -> succeeded)      │
    │   2. Pluggable Execution Engine (`pkg/builder`)                        │
-   │      - LocalDevBuilder: BuildKit step emulation & image generation     │
-   │      - NomadBatchBuilder: Dynamic Nomad batch job HCL generation       │
+   │      - LocalDevBuilder: Git & HTTP tarball BuildKit step emulation     │
+   │      - NomadBatchBuilder: Rootless BuildKit Nomad batch job HCL        │
    │   3. Live Log Streaming (`build_logs` table)                           │
    │   4. Cancellation & Concurrency Control                                │
    │   5. Event-Driven Handoff (`adroit.deploy.requested`)                  │
@@ -45,6 +49,8 @@ The **Build Service** manages the artifact creation lifecycle within the Adroit 
                                                   Orchestration Service
                                                     (Nomad Scheduler)
 ```
+
+*(Note: Services configured with `source_type: "image"` bypass the Build Service entirely and deploy directly via the Orchestration Service).*
 
 ---
 
@@ -68,13 +74,17 @@ All endpoints require JWT Bearer token authentication and verify organization me
 The platform supports pluggable builder engines via the `builder.Builder` interface:
 
 1. **Local / Dev Runner (`LocalDevBuilder`)**:
-   - Emulates rootless BuildKit multi-stage builds.
+   - Emulates rootless BuildKit multi-stage builds and Nixpacks zero-config step execution.
+   - Consumes both Git repositories (`RepoURL`) and remote HTTP tarball contexts (`ArchiveURL`).
+   - Automatically detects application runtimes (Node.js, Python, Go, Ruby) when `DockerfilePath` is omitted.
    - Outputs canonical OCI tags: `registry.adroit.run/<org>/<service>:<commit>`.
    - Generates deterministic SHA256 image digests (`sha256:<digest>`).
-   - Supports real-time log streaming and atomic cancellation.
+   - Supports real-time SSE log streaming and atomic cancellation.
 
 2. **Nomad Batch Runner (`NomadBatchBuilder`)**:
-   - Generates isolated Nomad batch job specifications running `moby/buildkit` rootless daemon.
+   - Generates isolated Nomad batch job specifications on cluster nodes.
+   - **Dockerfile Pipeline:** Runs `moby/buildkit:v0.12.5-rootless` mounting Git context or downloading HTTP tarball context via `--opt context=<archive_url>`.
+   - **Zero-Config Nixpacks Pipeline:** Runs `ghcr.io/railwayapp/nixpacks:latest` when `DockerfilePath == ""`, analyzing code manifests, generating hermetic build plans, and exporting OCI images with no Dockerfile required.
    - Allocates dedicated CPU, memory, and ephemeral disk to isolate multi-tenant compile tasks.
    - Pushes built artifacts directly to Harbor internal registry.
 
@@ -83,8 +93,9 @@ The platform supports pluggable builder engines via the `builder.Builder` interf
 ## 4. Event Lifecycle & Flow
 
 1. **`adroit.build.requested`**:
-   - Emitted by `git-integration-service` on Git push or via `POST /api/v1/services/{id}/builds`.
-   - Payload: `BuildID`, `ServiceID`, `RepoURL`, `Branch`, `CommitHash`, `DockerfilePath`.
+   - Emitted by `git-integration-service` on Git push, `project-service` upon source archive upload, or via `POST /api/v1/services/{id}/builds`.
+   - Payload: `BuildID`, `ServiceID`, `RepoURL`, `ArchiveURL`, `Branch`, `CommitHash`, `DockerfilePath`.
+   - Source Context Resolution: If `ArchiveURL` is populated, the build engine compiles from the stored tarball; otherwise, it clones from `RepoURL`.
 
 2. **`adroit.build.started`**:
    - Emitted when worker acquires execution slot and begins compilation.

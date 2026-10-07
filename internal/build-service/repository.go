@@ -70,7 +70,8 @@ func (r *PostgresRepository) CheckOrgMembership(ctx context.Context, orgID, user
 func (r *PostgresRepository) GetServiceByID(ctx context.Context, serviceID string) (*types.Service, error) {
 	query := `
 		SELECT id, organization_id, project_id, name, slug, type, runtime_tier,
-		       repo_url, branch, root_directory, build_command, start_command,
+		       COALESCE(source_type, 'git'), COALESCE(repo_url, ''), COALESCE(archive_url, ''), COALESCE(image_url, ''),
+		       branch, root_directory, build_command, start_command,
 		       dockerfile_path, port, min_replicas, max_replicas, cpu_cores,
 		       memory_mb, disk_mb, health_check_path, webhook_secret, created_at, updated_at
 		FROM services
@@ -79,7 +80,7 @@ func (r *PostgresRepository) GetServiceByID(ctx context.Context, serviceID strin
 	var (
 		s                                                                        types.Service
 		projID, rootDir, buildCmd, startCmd, dockerPath, healthPath, webhookSec sql.NullString
-		sType, rTier                                                             string
+		sType, rTier, srcType, repoURL, archiveURL, imageURL                     string
 	)
 
 	err := r.db.QueryRowContext(ctx, query, serviceID).Scan(
@@ -90,7 +91,10 @@ func (r *PostgresRepository) GetServiceByID(ctx context.Context, serviceID strin
 		&s.Slug,
 		&sType,
 		&rTier,
-		&s.RepoURL,
+		&srcType,
+		&repoURL,
+		&archiveURL,
+		&imageURL,
 		&s.Branch,
 		&rootDir,
 		&buildCmd,
@@ -120,6 +124,11 @@ func (r *PostgresRepository) GetServiceByID(ctx context.Context, serviceID strin
 	}
 	s.Type = types.ServiceType(sType)
 	s.RuntimeTier = types.RuntimeTier(rTier)
+	s.SourceType = types.SourceType(srcType)
+	s.RepoURL = repoURL
+	s.ArchiveURL = archiveURL
+	s.ImageURL = imageURL
+
 	if rootDir.Valid {
 		s.RootDirectory = rootDir.String
 	}
@@ -167,18 +176,23 @@ func (r *PostgresRepository) CreateBuild(ctx context.Context, b *types.Build) er
 	if b.CreatedAt.IsZero() {
 		b.CreatedAt = time.Now().UTC()
 	}
+	if b.SourceType == "" {
+		b.SourceType = types.SourceTypeGit
+	}
 
 	query := `
 		INSERT INTO builds (
-			id, service_id, commit_hash, branch, message, author,
+			id, service_id, source_type, archive_url, commit_hash, branch, message, author,
 			status, image_tag, image_digest, duration_ms, triggered_by,
 			error_message, created_at, finished_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
 		RETURNING id, created_at
 	`
 	err := r.db.QueryRowContext(ctx, query,
 		b.ID,
 		b.ServiceID,
+		string(b.SourceType),
+		b.ArchiveURL,
 		b.CommitHash,
 		b.Branch,
 		b.Message,
@@ -202,7 +216,8 @@ func (r *PostgresRepository) CreateBuild(ctx context.Context, b *types.Build) er
 // GetBuildByID retrieves a single build by its ID
 func (r *PostgresRepository) GetBuildByID(ctx context.Context, buildID string) (*types.Build, error) {
 	query := `
-		SELECT id, service_id, commit_hash, branch, COALESCE(message, ''),
+		SELECT id, service_id, COALESCE(source_type, 'git'), COALESCE(archive_url, ''),
+		       COALESCE(commit_hash, ''), COALESCE(branch, ''), COALESCE(message, ''),
 		       COALESCE(author, ''), status, COALESCE(image_tag, ''),
 		       COALESCE(image_digest, ''), COALESCE(duration_ms, 0),
 		       triggered_by, COALESCE(error_message, ''), created_at, finished_at
@@ -211,6 +226,7 @@ func (r *PostgresRepository) GetBuildByID(ctx context.Context, buildID string) (
 	`
 	var (
 		b          types.Build
+		srcType    string
 		statusStr  string
 		finishedAt sql.NullTime
 	)
@@ -218,6 +234,8 @@ func (r *PostgresRepository) GetBuildByID(ctx context.Context, buildID string) (
 	err := r.db.QueryRowContext(ctx, query, buildID).Scan(
 		&b.ID,
 		&b.ServiceID,
+		&srcType,
+		&b.ArchiveURL,
 		&b.CommitHash,
 		&b.Branch,
 		&b.Message,
@@ -238,6 +256,7 @@ func (r *PostgresRepository) GetBuildByID(ctx context.Context, buildID string) (
 		return nil, fmt.Errorf("failed to get build: %w", err)
 	}
 
+	b.SourceType = types.SourceType(srcType)
 	b.Status = types.BuildStatus(statusStr)
 	if finishedAt.Valid {
 		b.FinishedAt = &finishedAt.Time
@@ -275,7 +294,8 @@ func (r *PostgresRepository) ListBuildsByService(ctx context.Context, serviceID 
 
 	// 2. Fetch rows
 	query := `
-		SELECT id, service_id, commit_hash, branch, COALESCE(message, ''),
+		SELECT id, service_id, COALESCE(source_type, 'git'), COALESCE(archive_url, ''),
+		       COALESCE(commit_hash, ''), COALESCE(branch, ''), COALESCE(message, ''),
 		       COALESCE(author, ''), status, COALESCE(image_tag, ''),
 		       COALESCE(image_digest, ''), COALESCE(duration_ms, 0),
 		       triggered_by, COALESCE(error_message, ''), created_at, finished_at
@@ -303,12 +323,15 @@ func (r *PostgresRepository) ListBuildsByService(ctx context.Context, serviceID 
 	for rows.Next() {
 		var (
 			b          types.Build
+			srcType    string
 			statusStr  string
 			finishedAt sql.NullTime
 		)
 		err := rows.Scan(
 			&b.ID,
 			&b.ServiceID,
+			&srcType,
+			&b.ArchiveURL,
 			&b.CommitHash,
 			&b.Branch,
 			&b.Message,
@@ -325,6 +348,7 @@ func (r *PostgresRepository) ListBuildsByService(ctx context.Context, serviceID 
 		if err != nil {
 			return nil, 0, fmt.Errorf("failed to scan build row: %w", err)
 		}
+		b.SourceType = types.SourceType(srcType)
 		b.Status = types.BuildStatus(statusStr)
 		if finishedAt.Valid {
 			b.FinishedAt = &finishedAt.Time

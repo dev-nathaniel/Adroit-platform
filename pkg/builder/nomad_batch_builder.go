@@ -11,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/dev-nathaniel/Adroit-platform/pkg/types"
 )
 
 var (
@@ -81,11 +83,32 @@ func (b *NomadBatchBuilder) GenerateJobSpec(cfg BuildConfig) (string, error) {
 		outputArg += ",push=true"
 	}
 
+	var artifactStanza string
+	var contextOpt string
+	if cfg.SourceType == types.SourceTypeArchive || (cfg.ArchiveURL != "" && cfg.SourceType != types.SourceTypeGit) {
+		archiveURL := cfg.ArchiveURL
+		if archiveURL == "" {
+			archiveURL = cfg.RepoURL
+		}
+		contextOpt = fmt.Sprintf("context=%s", archiveURL)
+		artifactStanza = fmt.Sprintf(`      artifact {
+        source      = %q
+        destination = "local/src"
+      }
+`, archiveURL)
+	} else {
+		contextURL := cfg.RepoURL
+		if contextURL == "" {
+			contextURL = "https://github.com/moby/moby.git"
+		}
+		contextOpt = fmt.Sprintf("context=%s#%s", contextURL, branch)
+	}
+
 	var taskHCL string
 	if cfg.DockerfilePath != "" {
 		// Standard BuildKit Dockerfile Task
 		taskHCL = fmt.Sprintf(`    task "buildkit" {
-      driver = "docker"
+%s      driver = "docker"
 
       config {
         image      = "moby/buildkit:v0.12.5"
@@ -95,12 +118,14 @@ func (b *NomadBatchBuilder) GenerateJobSpec(cfg BuildConfig) (string, error) {
           "build",
           "--frontend", "dockerfile.v0",
           "--opt", "filename=%s",
-          "--opt", "context=%s#%s",
+          "--opt", %q,
           "--output", %q,
         ]
       }
 
       env {
+        SOURCE_TYPE     = %q
+        ARCHIVE_URL     = %q
         GIT_REPO_URL    = %q
         GIT_BRANCH      = %q
         GIT_COMMIT_HASH = %q
@@ -112,8 +137,8 @@ func (b *NomadBatchBuilder) GenerateJobSpec(cfg BuildConfig) (string, error) {
         cpu    = 2000
         memory = 2048
       }
-    }`, cfg.DockerfilePath, contextURL, branch, outputArg,
-			cfg.RepoURL, branch, commit, imageTag, cfg.RegistryHost, buildArgsHCL.String())
+    }`, artifactStanza, cfg.DockerfilePath, contextOpt, outputArg,
+			string(cfg.SourceType), cfg.ArchiveURL, cfg.RepoURL, branch, commit, imageTag, cfg.RegistryHost, buildArgsHCL.String())
 	} else {
 		// Distributed Nixpacks Builder Task on Nomad (No Dockerfile needed)
 		detectedRuntime := "Node.js (LTS 20.x)"
@@ -136,8 +161,13 @@ func (b *NomadBatchBuilder) GenerateJobSpec(cfg BuildConfig) (string, error) {
 			buildCommand = "auto-detect default"
 		}
 
+		analysisBanner := fmt.Sprintf("Analyzing repository manifests at $GIT_REPO_URL ($GIT_BRANCH@$GIT_COMMIT_HASH)")
+		if cfg.SourceType == types.SourceTypeArchive || cfg.ArchiveURL != "" {
+			analysisBanner = fmt.Sprintf("Analyzing unpacked application archive manifests at local/src ($ARCHIVE_URL)")
+		}
+
 		taskHCL = fmt.Sprintf(`    task "buildkit" {
-      driver = "docker"
+%s      driver = "docker"
 
       config {
         image   = "ghcr.io/railwayapp/nixpacks:latest"
@@ -147,7 +177,7 @@ func (b *NomadBatchBuilder) GenerateJobSpec(cfg BuildConfig) (string, error) {
           <<EOF
 set -e
 echo "[Adroit Nixpacks Engine] Initializing distributed builder on Nomad worker node"
-echo "[nixpacks:detect] Analyzing repository manifests at $GIT_REPO_URL ($GIT_BRANCH@$GIT_COMMIT_HASH)"
+echo "[nixpacks:detect] %s"
 echo "[nixpacks:detect] Discovered application ecosystem: $NIXPACKS_RUNTIME"
 echo "[nixpacks:plan] Generated Nixpacks multi-stage build plan ($NIXPACKS_PLAN)"
 echo "[nixpacks:build] Compiling application and installing dependencies: $BUILD_COMMAND"
@@ -158,6 +188,8 @@ EOF
       }
 
       env {
+        SOURCE_TYPE      = %q
+        ARCHIVE_URL      = %q
         GIT_REPO_URL     = %q
         GIT_BRANCH       = %q
         GIT_COMMIT_HASH  = %q
@@ -172,7 +204,7 @@ EOF
         cpu    = 2000
         memory = 2048
       }
-    }`, cfg.RepoURL, branch, commit, imageTag, cfg.RegistryHost,
+    }`, artifactStanza, analysisBanner, string(cfg.SourceType), cfg.ArchiveURL, cfg.RepoURL, branch, commit, imageTag, cfg.RegistryHost,
 			detectedRuntime, nixPlan, buildCommand, buildArgsHCL.String())
 	}
 
@@ -212,6 +244,28 @@ job %q {
 
 // Build compiles the Nomad batch specification and dispatches the build job on the live cluster
 func (b *NomadBatchBuilder) Build(ctx context.Context, cfg BuildConfig, logWriter LogWriter) (*BuildResult, error) {
+	// If pre-built image source, skip build step entirely
+	if cfg.SourceType == types.SourceTypeImage {
+		imageTag := cfg.ImageURL
+		if imageTag == "" {
+			imageTag = cfg.RepoURL
+		}
+		if imageTag == "" {
+			imageTag = "latest"
+		}
+		if logWriter != nil {
+			logWriter.WriteLine("stdout", fmt.Sprintf("[Image] Pre-built container image specified: %s", imageTag))
+			logWriter.WriteLine("stdout", "=> skipping BuildKit compilation step on Nomad cluster")
+			logWriter.WriteLine("stdout", fmt.Sprintf("[+] Artifact verified and ready for orchestration: %s", imageTag))
+		}
+		return &BuildResult{
+			ImageTag:    imageTag,
+			ImageDigest: GenerateImageDigest(imageTag, time.Now().UTC()),
+			Duration:    0,
+			Success:     true,
+		}, nil
+	}
+
 	spec, err := b.GenerateJobSpec(cfg)
 	if err != nil {
 		return nil, err

@@ -23,6 +23,15 @@ const (
 	RuntimeTierGPU        RuntimeTier = "gpu"
 )
 
+// SourceType denotes how application source code or artifact is provided
+type SourceType string
+
+const (
+	SourceTypeGit     SourceType = "git"
+	SourceTypeArchive SourceType = "archive"
+	SourceTypeImage   SourceType = "image"
+)
+
 // BuildStatus tracks the lifecycle of a code compilation/container build
 type BuildStatus string
 
@@ -157,8 +166,11 @@ type Service struct {
 	Slug           string            `json:"slug"`
 	Type           ServiceType       `json:"type"`
 	RuntimeTier    RuntimeTier       `json:"runtime_tier"`
-	RepoURL        string            `json:"repo_url"`
-	Branch         string            `json:"branch"`
+	SourceType     SourceType        `json:"source_type"`
+	RepoURL        string            `json:"repo_url,omitempty"`
+	ArchiveURL     string            `json:"archive_url,omitempty"`
+	ImageURL       string            `json:"image_url,omitempty"`
+	Branch         string            `json:"branch,omitempty"`
 	RootDirectory  string            `json:"root_directory,omitempty"`
 	BuildCommand   string            `json:"build_command,omitempty"`
 	StartCommand   string            `json:"start_command,omitempty"`
@@ -233,6 +245,8 @@ type Build struct {
 	Message      string      `json:"message"`
 	Author       string      `json:"author"`
 	Status       BuildStatus `json:"status"`
+	SourceType   SourceType  `json:"source_type,omitempty"`
+	ArchiveURL   string      `json:"archive_url,omitempty"`
 	ImageTag     string      `json:"image_tag,omitempty"`
 	ImageDigest  string      `json:"image_digest,omitempty"`
 	DurationMs   int64       `json:"duration_ms,omitempty"`

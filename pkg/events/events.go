@@ -94,9 +94,12 @@ type BuildRequestedPayload struct {
 	BuildID        string            `json:"build_id"`
 	ServiceID      string            `json:"service_id"`
 	ProjectID      string            `json:"project_id"`
-	RepoURL        string            `json:"repo_url"`
-	Branch         string            `json:"branch"`
-	CommitHash     string            `json:"commit_hash"`
+	SourceType     string            `json:"source_type,omitempty"`
+	RepoURL        string            `json:"repo_url,omitempty"`
+	ArchiveURL     string            `json:"archive_url,omitempty"`
+	ImageURL       string            `json:"image_url,omitempty"`
+	Branch         string            `json:"branch,omitempty"`
+	CommitHash     string            `json:"commit_hash,omitempty"`
 	DockerfilePath string            `json:"dockerfile_path,omitempty"`
 	BuildArgs      map[string]string `json:"build_args,omitempty"`
 }
@@ -256,8 +259,11 @@ type ServiceCreatedPayload struct {
 	Name           string  `json:"name"`
 	Slug           string  `json:"slug"`
 	Type           string  `json:"type"`
-	RepoURL        string  `json:"repo_url"`
-	Branch         string  `json:"branch"`
+	SourceType     string  `json:"source_type,omitempty"`
+	RepoURL        string  `json:"repo_url,omitempty"`
+	ArchiveURL     string  `json:"archive_url,omitempty"`
+	ImageURL       string  `json:"image_url,omitempty"`
+	Branch         string  `json:"branch,omitempty"`
 }
 
 // ServiceUpdatedPayload is emitted when service config changes

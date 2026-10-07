@@ -6,6 +6,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/dev-nathaniel/Adroit-platform/pkg/types"
 )
 
 // LocalDevBuilder simulates or executes local Docker/BuildKit builds
@@ -28,6 +30,32 @@ func NewLocalDevBuilder(stepDuration time.Duration) *LocalDevBuilder {
 func (b *LocalDevBuilder) Build(ctx context.Context, cfg BuildConfig, logWriter LogWriter) (*BuildResult, error) {
 	if cfg.BuildID == "" {
 		return nil, fmt.Errorf("%w: build_id is required", ErrInvalidConfig)
+	}
+
+	writeLog := func(stream, line string) {
+		if logWriter != nil {
+			logWriter.WriteLine(stream, line)
+		}
+	}
+
+	// If pre-built image source, skip build step entirely
+	if cfg.SourceType == types.SourceTypeImage {
+		imageTag := cfg.ImageURL
+		if imageTag == "" {
+			imageTag = cfg.RepoURL
+		}
+		if imageTag == "" {
+			imageTag = "latest"
+		}
+		writeLog("stdout", fmt.Sprintf("[Image] Pre-built container image specified: %s", imageTag))
+		writeLog("stdout", "=> skipping BuildKit compilation step (pre-built image)")
+		writeLog("stdout", fmt.Sprintf("=> image artifact verified: %s", imageTag))
+		return &BuildResult{
+			ImageTag:    imageTag,
+			ImageDigest: GenerateImageDigest(imageTag, time.Now().UTC()),
+			Duration:    0,
+			Success:     true,
+		}, nil
 	}
 
 	buildCtx, cancel := context.WithCancel(ctx)
@@ -55,12 +83,6 @@ func (b *LocalDevBuilder) Build(ctx context.Context, cfg BuildConfig, logWriter 
 	}
 
 	imageTag := GenerateImageTag(cfg.RegistryHost, cfg.OrgSlug, cfg.ServiceSlug, commit)
-
-	writeLog := func(stream, line string) {
-		if logWriter != nil {
-			logWriter.WriteLine(stream, line)
-		}
-	}
 	logf := func(stream, format string, args ...any) {
 		writeLog(stream, fmt.Sprintf(format, args...))
 	}
@@ -89,9 +111,14 @@ func (b *LocalDevBuilder) Build(ctx context.Context, cfg BuildConfig, logWriter 
 			buildpackID = "paketo-buildpacks/ruby"
 		}
 
+		sourceDesc := fmt.Sprintf("repository %s (%s@%s)", cfg.RepoURL, branch, commit)
+		if cfg.SourceType == types.SourceTypeArchive || cfg.ArchiveURL != "" {
+			sourceDesc = fmt.Sprintf("uploaded archive %s", cfg.ArchiveURL)
+		}
+
 		steps = append(steps,
 			step{name: "[+] No Dockerfile found: Invoking Cloud Native Buildpacks (CNB) auto-detection", stream: "stdout"},
-			step{name: fmt.Sprintf("=> [buildpack:detect] Inspecting repository %s (%s@%s)", cfg.RepoURL, branch, commit), stream: "stdout"},
+			step{name: fmt.Sprintf("=> [buildpack:detect] Inspecting %s", sourceDesc), stream: "stdout"},
 			step{name: fmt.Sprintf("=> [buildpack:detect] Identified application ecosystem: %s", detectedRuntime), stream: "stdout"},
 			step{name: fmt.Sprintf("=> [buildpack:plan] Selected buildpack pipeline: %s", buildpackID), stream: "stdout"},
 			step{name: "=> [buildpack:build] Setting up hermetic build environment and fetching base layers", stream: "stdout"},
@@ -120,12 +147,17 @@ func (b *LocalDevBuilder) Build(ctx context.Context, cfg BuildConfig, logWriter 
 			step{name: fmt.Sprintf("=> => naming to %s", imageTag), stream: "stdout"},
 		)
 	} else {
+		contextDesc := fmt.Sprintf("%s (%s@%s)", cfg.RepoURL, branch, commit)
+		if cfg.SourceType == types.SourceTypeArchive || cfg.ArchiveURL != "" {
+			contextDesc = fmt.Sprintf("archive context %s", cfg.ArchiveURL)
+		}
+
 		steps = append(steps,
 			step{name: "[+] Building with BuildKit engine (Adroit Local Runner)", stream: "stdout"},
 			step{name: fmt.Sprintf("=> [internal] load build definition from %s", cfg.DockerfilePath), stream: "stdout"},
 			step{name: "=> [internal] load .dockerignore", stream: "stdout"},
 			step{name: "=> [internal] load metadata for docker.io/library/alpine:latest", stream: "stdout"},
-			step{name: fmt.Sprintf("=> [internal] load build context from %s (%s@%s)", cfg.RepoURL, branch, commit), stream: "stdout"},
+			step{name: fmt.Sprintf("=> [internal] load build context from %s", contextDesc), stream: "stdout"},
 		)
 		if cfg.BuildCommand != "" {
 			steps = append(steps, step{

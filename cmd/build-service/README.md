@@ -8,7 +8,7 @@
 
 ## 1. Overview
 
-`cmd/build-service` is the standalone microservice daemon for the **Build Service**. It coordinates container image builds (BuildKit / local emulation / Nomad batch jobs), manages build log streaming (SSE), and emits `adroit.deploy.requested` events upon build completion.
+`cmd/build-service` is the standalone microservice daemon for the **Build Service**. It coordinates container image builds (BuildKit / local emulation / Nomad batch jobs) from Git repositories or remote HTTP tarballs (`archive_url`), manages real-time build log streaming (SSE), and emits `adroit.deploy.requested` events upon build completion. Workloads deploying pre-built container images (`source_type: image`) bypass this daemon and deploy directly.
 
 For full architecture details, see [internal/build-service/README.md](../../internal/build-service/README.md).
 

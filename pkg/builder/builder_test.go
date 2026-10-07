@@ -6,6 +6,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/dev-nathaniel/Adroit-platform/pkg/types"
 )
 
 type memoryLogWriter struct {
@@ -230,3 +232,127 @@ func TestNomadBatchBuilder_LiveNomadSubmission(t *testing.T) {
 	// Clean up / purge test batch job
 	_ = nomad.stopJob(context.Background(), "adroit-build-bld-live-batch-001")
 }
+
+func TestNomadBatchBuilder_ArchiveSourceSpec(t *testing.T) {
+	nomad := NewNomadBatchBuilder("http://127.0.0.1:4646", "dc1", nil)
+
+	cfg := BuildConfig{
+		BuildID:        "bld-archive-001",
+		ServiceID:      "svc-archive",
+		ServiceName:    "archive-app",
+		ServiceSlug:    "archive-app",
+		OrgSlug:        "my-org",
+		SourceType:     types.SourceTypeArchive,
+		ArchiveURL:     "https://storage.adroit.run/sources/svc-archive/bundle-abc123.tar.gz",
+		DockerfilePath: "Dockerfile",
+	}
+
+	spec, err := nomad.GenerateJobSpec(cfg)
+	if err != nil {
+		t.Fatalf("failed to generate job spec: %v", err)
+	}
+
+	// 1. Must contain Nomad artifact stanza downloading archive
+	if !strings.Contains(spec, `artifact {`) || !strings.Contains(spec, `source      = "https://storage.adroit.run/sources/svc-archive/bundle-abc123.tar.gz"`) {
+		t.Errorf("missing artifact stanza for archive download in spec:\n%s", spec)
+	}
+
+	// 2. BuildKit context option must be the archive URL
+	if !strings.Contains(spec, `"--opt", "context=https://storage.adroit.run/sources/svc-archive/bundle-abc123.tar.gz"`) {
+		t.Errorf("missing BuildKit archive context option in spec:\n%s", spec)
+	}
+}
+
+func TestNomadBatchBuilder_ImageSource_BypassesNomad(t *testing.T) {
+	// Nomad pointing to dummy offline address - must NOT make any HTTP calls
+	nomad := NewNomadBatchBuilder("http://invalid-nomad-host:9999", "dc1", nil)
+
+	cfg := BuildConfig{
+		BuildID:     "bld-image-001",
+		ServiceID:   "svc-image",
+		ServiceName: "postgres-svc",
+		ServiceSlug: "postgres-svc",
+		OrgSlug:     "my-org",
+		SourceType:  types.SourceTypeImage,
+		ImageURL:    "docker.io/library/postgres:16-alpine",
+	}
+
+	res, err := nomad.Build(context.Background(), cfg, nil)
+	if err != nil {
+		t.Fatalf("expected image source to bypass Nomad build and succeed, got err: %v", err)
+	}
+	if !res.Success {
+		t.Errorf("expected success to be true")
+	}
+	if res.ImageTag != "docker.io/library/postgres:16-alpine" {
+		t.Errorf("expected image tag postgres:16-alpine, got %s", res.ImageTag)
+	}
+	if res.Duration != 0 {
+		t.Errorf("expected 0 duration for pre-built image, got %v", res.Duration)
+	}
+}
+
+func TestLocalDevBuilder_ImageSource(t *testing.T) {
+	local := NewLocalDevBuilder(0)
+
+	cfg := BuildConfig{
+		BuildID:     "bld-local-img",
+		ServiceID:   "svc-img",
+		ServiceName: "redis-cache",
+		ServiceSlug: "redis-cache",
+		OrgSlug:     "my-org",
+		SourceType:  types.SourceTypeImage,
+		ImageURL:    "redis:7.2-alpine",
+	}
+
+	res, err := local.Build(context.Background(), cfg, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !res.Success {
+		t.Errorf("expected success")
+	}
+	if res.ImageTag != "redis:7.2-alpine" {
+		t.Errorf("expected redis:7.2-alpine, got %s", res.ImageTag)
+	}
+}
+
+func TestLocalDevBuilder_ArchiveSource(t *testing.T) {
+	local := NewLocalDevBuilder(0)
+
+	var logLines []string
+	logs := FuncLogWriter(func(stream, line string) {
+		logLines = append(logLines, line)
+	})
+
+	cfg := BuildConfig{
+		BuildID:        "bld-local-archive",
+		ServiceID:      "svc-archive",
+		ServiceName:    "archive-app",
+		ServiceSlug:    "archive-app",
+		OrgSlug:        "my-org",
+		SourceType:     types.SourceTypeArchive,
+		ArchiveURL:     "http://localhost:8080/api/v1/services/source/download/app.tar.gz",
+		DockerfilePath: "Dockerfile",
+	}
+
+	res, err := local.Build(context.Background(), cfg, logs)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !res.Success {
+		t.Errorf("expected success")
+	}
+
+	var hasArchiveContext bool
+	for _, l := range logLines {
+		if strings.Contains(l, "archive context") {
+			hasArchiveContext = true
+			break
+		}
+	}
+	if !hasArchiveContext {
+		t.Errorf("expected log to mention archive context, got logs: %v", logLines)
+	}
+}
+

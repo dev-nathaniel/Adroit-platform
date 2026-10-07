@@ -123,6 +123,8 @@ func (s *Service) TriggerBuild(ctx context.Context, userID, serviceID string, re
 	build := &types.Build{
 		ID:          uuid.New().String(),
 		ServiceID:   svc.ID,
+		SourceType:  svc.SourceType,
+		ArchiveURL:  svc.ArchiveURL,
 		CommitHash:  commitHash,
 		Branch:      branch,
 		Message:     message,
@@ -157,6 +159,9 @@ func (s *Service) TriggerBuild(ctx context.Context, userID, serviceID string, re
 		BuildID:        build.ID,
 		ServiceID:      svc.ID,
 		ProjectID:      projID,
+		SourceType:     string(svc.SourceType),
+		ArchiveURL:     svc.ArchiveURL,
+		ImageURL:       svc.ImageURL,
 		RepoURL:        svc.RepoURL,
 		Branch:         branch,
 		CommitHash:     commitHash,
@@ -479,6 +484,15 @@ func (s *Service) ExecuteBuild(parentCtx context.Context, buildID string, buildA
 		_ = s.repo.InsertBuildLog(context.Background(), entry)
 	})
 
+	archiveURL := svc.ArchiveURL
+	if build.ArchiveURL != "" {
+		archiveURL = build.ArchiveURL
+	}
+	sourceType := svc.SourceType
+	if build.SourceType != "" {
+		sourceType = build.SourceType
+	}
+
 	// 4. Invoke Builder engine
 	buildCfg := builder.BuildConfig{
 		BuildID:        buildID,
@@ -486,6 +500,9 @@ func (s *Service) ExecuteBuild(parentCtx context.Context, buildID string, buildA
 		ServiceName:    svc.Name,
 		ServiceSlug:    svc.Slug,
 		OrgSlug:        orgSlug,
+		SourceType:     sourceType,
+		ArchiveURL:     archiveURL,
+		ImageURL:       svc.ImageURL,
 		RepoURL:        svc.RepoURL,
 		Branch:         build.Branch,
 		CommitHash:     build.CommitHash,
@@ -496,7 +513,25 @@ func (s *Service) ExecuteBuild(parentCtx context.Context, buildID string, buildA
 		RegistryHost:   s.cfg.RegistryHost,
 	}
 
-	res, buildErr := s.builder.Build(buildCtx, buildCfg, logWriter)
+	var res *builder.BuildResult
+	var buildErr error
+
+	if sourceType == types.SourceTypeImage {
+		img := svc.ImageURL
+		if img == "" {
+			img = svc.RepoURL
+		}
+		logWriter.WriteLine("stdout", fmt.Sprintf("[+] Pre-built container image selected: %s (bypassing BuildKit build step)", img))
+		res = &builder.BuildResult{
+			Success:  true,
+			ImageTag: img,
+		}
+	} else if s.builder != nil {
+		res, buildErr = s.builder.Build(buildCtx, buildCfg, logWriter)
+	} else {
+		buildErr = errors.New("builder engine not configured")
+	}
+
 	finishedAt := time.Now().UTC()
 	durationMs := int64(finishedAt.Sub(startTime).Milliseconds())
 
