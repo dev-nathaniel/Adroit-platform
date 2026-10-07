@@ -333,7 +333,7 @@ func (r *PostgresRepository) PurgeLogs(ctx context.Context, serviceID string, be
 func (r *PostgresRepository) GetService(ctx context.Context, serviceID string) (*types.Service, error) {
 	query := `
 		SELECT id, organization_id, project_id, name, slug, type, runtime_tier,
-		       repo_url, branch, port, min_replicas, max_replicas,
+		       COALESCE(repo_url, ''), branch, port, min_replicas, max_replicas,
 		       created_at, updated_at
 		FROM services
 		WHERE id = $1
