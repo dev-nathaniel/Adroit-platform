@@ -73,10 +73,12 @@ All routes are dispatched through the API Gateway at `http://localhost:8080`:
   - `GET /api/v1/projects/:id/services` (List services in project)
   - `POST /api/v1/projects/:id/services` (Create service in project)
 * **Services (Workload Lifecycle):**
-  - `POST /api/v1/services` (Create service, standalone or project-scoped)
+  - `POST /api/v1/services` (Create service: `git`, `archive`, or `image` source types)
   - `GET /api/v1/services` (List services, filter by `organization_id`, `project_id`, or `standalone=true`)
   - `GET /api/v1/services/:id` (Service details & specs)
   - `PATCH /api/v1/services/:id` (Update service configuration)
+  - `POST /api/v1/services/:id/upload` (Upload source archive `.zip` or `.tar.gz`, optional `?trigger_build=true`)
+  - `GET /api/v1/services/:id/source/download` (Download normalized `.tar.gz` source archive)
   - `POST /api/v1/services/:id/move` (Move service between projects or detach to standalone)
   - `DELETE /api/v1/services/:id` (Delete service)
 * **Environment Variables & Secrets Management:**
@@ -93,14 +95,14 @@ All routes are dispatched through the API Gateway at `http://localhost:8080`:
   - `GET /api/v1/git/repositories` (Discover organization repos)
   - `POST /api/v1/webhooks/github` (Ingest push/ping events, verify HMAC-SHA256 signature)
 * **Build Service:**
-  - `POST /api/v1/builds` (Trigger build)
+  - `POST /api/v1/builds` (Trigger build for Git or Archive service)
   - `GET /api/v1/builds/:id` (Get build status & metadata)
   - `GET /api/v1/services/:id/builds` (List builds for service)
   - `GET /api/v1/builds/:id/logs` (Get build logs)
   - `GET /api/v1/builds/:id/logs/stream` (Live SSE build log stream)
   - `POST /api/v1/builds/:id/cancel` (Cancel active build)
 * **Deployments & Orchestration:**
-  - `POST /api/v1/services/:id/deploy` (Trigger rollout)
+  - `POST /api/v1/services/:id/deploy` (Trigger rollout; supports build-linked deployments and direct `image` deployments)
   - `GET /api/v1/services/:id/deployments` (Deployment history)
   - `GET /api/v1/deployments/:id` (Deployment status & active URL)
   - `GET /api/v1/deployments/:id/spec` (View generated Nomad HCL job specification)
@@ -248,4 +250,84 @@ The API Gateway enforces distributed rate limiting across all incoming requests:
    - `X-RateLimit-Reset`: Seconds until quota refills.
    - `X-RateLimit-Tier`: Resolved subscriber tier (`free`, `pro`, `enterprise`, `internal`).
    - `Retry-After`: Returned with HTTP `429 Too Many Requests` indicating wait seconds.
+
+---
+
+## 7. Workload Deployment Paradigms & Object Storage
+
+Adroit supports 3 distinct workload deployment models designed for developer flexibility, CLI productivity, and modern cloud operations:
+
+```
+                  ┌────────────────────────────────────────────────────────┐
+                  │                 Workload Ingestion                     │
+                  └──────────────────────────┬─────────────────────────────┘
+                                             │
+         ┌───────────────────────────────────┼───────────────────────────────────┐
+         │ (1) GitOps                        │ (2) Archive / CLI                 │ (3) Container Image
+         ▼                                   ▼                                   ▼
+┌──────────────────┐               ┌──────────────────┐                ┌──────────────────┐
+│ GitHub / GitLab  │               │ Local Folder     │                │ Docker Hub / ECR │
+│ Git Repository   │               │ .zip / .tar.gz   │                │ Pre-built Image  │
+└────────┬─────────┘               └────────┬─────────┘                └────────┬─────────┘
+         │                                  │                                   │
+         │ Git Webhook                      │ POST /services/:id/upload         │
+         │ or Manual Build                  │                                   │
+         ▼                                  ▼                                   │
+┌──────────────────┐               ┌──────────────────┐                         │
+│ Git Integration  │               │ pkg/storage      │                         │
+│ Service          │               │ S3 / R2 / MinIO  │                         │
+└────────┬─────────┘               └────────┬─────────┘                         │
+         │                                  │                                   │
+         │ adroit.build.requested           │ adroit.build.requested            │
+         │ (RepoURL, Branch, Commit)        │ (ArchiveURL, Context Tarball)     │
+         ▼                                  ▼                                   │
+┌─────────────────────────────────────────────────────┐                         │
+│                    Build Service                    │                         │
+│     (Rootless BuildKit / Nomad Batch Execution)     │                         │
+└──────────────────────────┬──────────────────────────┘                         │
+                           │                                                    │
+                           │ adroit.deploy.requested                            │ Direct Deploy
+                           ▼                                                    ▼
+┌─────────────────────────────────────────────────────────────────────────────────────────┐
+│                          Orchestration & Runtime Service                                │
+│                     (Nomad Scheduler + Consul Connect + Traefik)                        │
+└─────────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 7.1 Deployment Paradigms
+
+| Mode | `source_type` | Inputs | Build Pipeline | Deployment Target | Best For |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **GitOps** | `git` | `repo_url`, `branch`, `commit` | Clones Git repo, compiles image | Nomad container cluster | Team repos, continuous delivery, pull request previews |
+| **CLI / Archive** | `archive` | `.zip` or `.tar.gz` payload | Downloads archive, unpacks HTTP context into BuildKit | Nomad container cluster | CLI `adroit deploy`, monorepo subfolders, rapid offline development |
+| **Pre-built Image** | `image` | `image_url` (e.g. `postgres:16`) | **Bypassed completely** | Nomad container cluster | Off-the-shelf databases, Redis, microservices built in external CI |
+
+### 7.2 Archive Normalization & Security Pipeline
+
+When uploading archives via `POST /api/v1/services/:id/upload`:
+1. **Multipart Validation:** Enforces standard MIME detection and 100MB upload limits.
+2. **Zip Slip Traversal Prevention:** Rejects any entry attempting directory escape (e.g. `../../etc/passwd` or absolute roots).
+3. **Deterministic Gzip Normalization:** Unpacks `.zip` or uncompressed archives and streams them into standardized `.tar.gz` format via [`pkg/storage.NormalizeToTarGz`](../pkg/storage/archive.go).
+4. **Integrity Checksums:** Computes streaming SHA-256 digests recorded alongside file size in PostgreSQL.
+5. **Secure Storage Provider:** Uploads normalized tarball to configured object storage (local disk, AWS S3, Cloudflare R2, or MinIO).
+
+### 7.3 Storage Engine Configuration
+
+The artifact storage subsystem (`pkg/storage`) is configurable via environment variables on `project-service`:
+
+```bash
+# Local filesystem storage (development default)
+STORAGE_BACKEND=local
+STORAGE_LOCAL_DIR=./data/storage
+
+# AWS S3 / Cloudflare R2 / MinIO (production)
+STORAGE_BACKEND=s3
+STORAGE_S3_ENDPOINT=https://<account-id>.r2.cloudflarestorage.com
+STORAGE_S3_REGION=auto
+STORAGE_S3_BUCKET=adroit-sources
+STORAGE_S3_ACCESS_KEY=<access-key>
+STORAGE_S3_SECRET_KEY=<secret-key>
+STORAGE_S3_USE_PATH_STYLE=false
+```
+
 

@@ -1832,6 +1832,101 @@ paths:
         '404':
           $ref: '#/components/responses/NotFoundError'
 
+  /api/v1/services/{id}/upload:
+    post:
+      tags:
+        - Services
+      summary: Upload Source Code Archive
+      description: |
+        Uploads a zipped or tarballed source code archive (.zip, .tar.gz, .tar) for the service.
+        Normalizes the archive to standard tar.gz format, uploads to artifact storage,
+        updates the service record with the archive URL, and optionally enqueues an automated build.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Service UUID
+          schema:
+            type: string
+            format: uuid
+        - name: trigger_build
+          in: query
+          required: false
+          description: Whether to immediately trigger a build for the uploaded source (defaults to true)
+          schema:
+            type: boolean
+            default: true
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - file
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: Source code archive file (.zip, .tar.gz, .tgz, .tar)
+      responses:
+        '201':
+          description: Archive uploaded and processed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UploadSourceResponseEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /api/v1/services/{id}/source/download:
+    get:
+      tags:
+        - Services
+      summary: Download Source Code Archive
+      description: Streams the active source code archive bundle (.tar.gz) for the service.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Service UUID
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Source code archive stream
+          headers:
+            Content-Type:
+              schema:
+                type: string
+                example: application/gzip
+            Content-Disposition:
+              schema:
+                type: string
+                example: attachment; filename="source.tar.gz"
+          content:
+            application/gzip:
+              schema:
+                type: string
+                format: binary
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
   # ==========================================
   # GIT INTEGRATION & WEBHOOKS
   # ==========================================
@@ -4441,7 +4536,6 @@ components:
       required:
         - organization_id
         - name
-        - repo_url
       properties:
         organization_id:
           type: string
@@ -4465,9 +4559,22 @@ components:
           type: string
           enum: [general, isolated, high_memory, gpu]
           default: general
+        source_type:
+          type: string
+          enum: [git, archive, image]
+          default: git
+          description: Workload deployment source type ('git' repo, uploaded 'archive', or pre-built 'image')
         repo_url:
           type: string
           example: "https://github.com/my-org/my-api"
+          description: Git repository URL (required when source_type is 'git')
+        archive_url:
+          type: string
+          description: Storage or pre-signed URL of the uploaded source archive bundle
+        image_url:
+          type: string
+          example: "postgres:16-alpine"
+          description: Pre-built container image (required when source_type is 'image')
         branch:
           type: string
           default: "main"
@@ -4518,7 +4625,14 @@ components:
         runtime_tier:
           type: string
           enum: [general, isolated, high_memory, gpu]
+        source_type:
+          type: string
+          enum: [git, archive, image]
         repo_url:
+          type: string
+        archive_url:
+          type: string
+        image_url:
           type: string
         branch:
           type: string
@@ -4555,6 +4669,44 @@ components:
           description: Target project UUID, or null to detach workload into a standalone service
           example: "a81d4512-70b9-4929-9e12-3b2d1945f345"
 
+    UploadSourceResponse:
+      type: object
+      properties:
+        service_id:
+          type: string
+          format: uuid
+        source_type:
+          type: string
+          enum: [git, archive, image]
+          example: "archive"
+        archive_url:
+          type: string
+          example: "https://storage.adroit.run/artifacts/svc-123/bundle.tar.gz"
+        size_bytes:
+          type: integer
+          example: 1048576
+        checksum:
+          type: string
+          example: "sha256:7f83b1657ff1fc53b92dc18148a1d65dfc2d4b1fa3d677284addd200126d9069"
+        build_id:
+          type: string
+          format: uuid
+        message:
+          type: string
+          example: "Source code bundle uploaded successfully"
+
+    UploadSourceResponseEnvelope:
+      type: object
+      required:
+        - success
+        - data
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          $ref: '#/components/schemas/UploadSourceResponse'
+
     Service:
       type: object
       properties:
@@ -4577,7 +4729,15 @@ components:
           type: string
         runtime_tier:
           type: string
+        source_type:
+          type: string
+          enum: [git, archive, image]
+          example: "git"
         repo_url:
+          type: string
+        archive_url:
+          type: string
+        image_url:
           type: string
         branch:
           type: string
@@ -4624,8 +4784,6 @@ components:
         - slug
         - type
         - runtime_tier
-        - repo_url
-        - branch
         - port
         - min_replicas
         - max_replicas

@@ -1519,6 +1519,98 @@
 					"response": []
 				},
 				{
+					"name": "Create Container Image Service (Pre-built Image)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 201) {",
+									"    var res = pm.response.json();",
+									"    if (res.data && res.data.id) {",
+									"        pm.collectionVariables.set('serviceId', res.data.id);",
+									"        console.log('Saved container image service id: ' + res.data.id);",
+									"    }",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"organization_id\": \"{{orgId}}\",\n  \"name\": \"Redis Cache\",\n  \"type\": \"redis\",\n  \"source_type\": \"image\",\n  \"image_url\": \"redis:7-alpine\",\n  \"port\": 6379\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/services",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"services"
+							]
+						},
+						"description": "Creates a service from a pre-built container image. Bypasses the build pipeline and deploys directly to Nomad."
+					},
+					"response": []
+				},
+				{
+					"name": "Create Archive Service (CLI / Folder Upload)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 201) {",
+									"    var res = pm.response.json();",
+									"    if (res.data && res.data.id) {",
+									"        pm.collectionVariables.set('serviceId', res.data.id);",
+									"        console.log('Saved archive service id: ' + res.data.id);",
+									"    }",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"organization_id\": \"{{orgId}}\",\n  \"name\": \"Landing Page Web\",\n  \"type\": \"web\",\n  \"source_type\": \"archive\",\n  \"port\": 80\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/services",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"services"
+							]
+						},
+						"description": "Creates a service intended for direct archive uploads (.zip or .tar.gz). Does not require a Git repository."
+					},
+					"response": []
+				},
+				{
 					"name": "List Standalone Services",
 					"request": {
 						"method": "GET",
@@ -1566,6 +1658,85 @@
 							]
 						},
 						"description": "Returns full workload configuration, resource limits, and health check settings."
+					},
+					"response": []
+				},
+				{
+					"name": "Upload Source Archive (.zip / .tar.gz)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    var res = pm.response.json();",
+									"    if (res.data && res.data.build_id) {",
+									"        pm.collectionVariables.set('buildId', res.data.build_id);",
+									"        console.log('Saved build id from archive upload: ' + res.data.build_id);",
+									"    }",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "formdata",
+							"formdata": [
+								{
+									"key": "file",
+									"type": "file",
+									"description": "Source code archive (.zip, .tar.gz, or .tar - max 100MB)"
+								}
+							]
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/services/{{serviceId}}/upload?trigger_build=true",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"services",
+								"{{serviceId}}",
+								"upload"
+							],
+							"query": [
+								{
+									"key": "trigger_build",
+									"value": "true",
+									"description": "Optionally trigger a build automatically after upload"
+								}
+							]
+						},
+						"description": "Uploads a source archive for the service. Automatically validates Zip Slip security, normalizes to .tar.gz, computes SHA-256 checksum, stores to object storage, and optionally triggers a build."
+					},
+					"response": []
+				},
+				{
+					"name": "Download Source Archive",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/services/{{serviceId}}/source/download",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"services",
+								"{{serviceId}}",
+								"source",
+								"download"
+							]
+						},
+						"description": "Streams the normalized .tar.gz source archive for the service. Used by BuildKit to fetch HTTP tarball build contexts or for backup."
 					},
 					"response": []
 				},
@@ -2335,6 +2506,55 @@
 							]
 						},
 						"description": "Initiates a zero-downtime rolling update deployment on Nomad for the service."
+					},
+					"response": []
+				},
+				{
+					"name": "Deploy Container Image Service (Direct Image Bypass)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 202 || pm.response.code === 200 || pm.response.code === 201) {",
+									"    var json = pm.response.json();",
+									"    if (json.data && json.data.id) {",
+									"        pm.environment.set(\"deploymentId\", json.data.id);",
+									"        pm.collectionVariables.set(\"deploymentId\", json.data.id);",
+									"        console.log(\"Saved deploymentId:\", json.data.id);",
+									"    }",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"replicas\": 1,\n  \"strategy\": \"rolling\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/services/{{serviceId}}/deploy",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"services",
+								"{{serviceId}}",
+								"deploy"
+							]
+						},
+						"description": "Directly deploys a service configured with source_type='image' using its configured image_url. Bypasses the build service and requires no build_id."
 					},
 					"response": []
 				},
