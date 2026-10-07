@@ -194,3 +194,39 @@ func TestNomadBatchBuilder_GenerateJobSpec(t *testing.T) {
 		t.Errorf("missing build arg in spec")
 	}
 }
+
+func TestNomadBatchBuilder_LiveNomadSubmission(t *testing.T) {
+	nomad := NewNomadBatchBuilder("http://localhost:4646", "dc1", nil)
+
+	cfg := BuildConfig{
+		BuildID:        "bld-live-batch-001",
+		ServiceID:      "svc-live-batch",
+		ServiceName:    "live-batch-service",
+		ServiceSlug:    "live-batch-service",
+		OrgSlug:        "acme",
+		RepoURL:        "https://github.com/Dev-Nathaniel/test-repo.git",
+		Branch:         "main",
+		CommitHash:     "1234567890ab",
+		DockerfilePath: "Dockerfile",
+	}
+
+	spec, err := nomad.GenerateJobSpec(cfg)
+	if err != nil {
+		t.Fatalf("failed to generate job spec: %v", err)
+	}
+
+	parsed, err := nomad.parseJobHCL(context.Background(), spec)
+	if err != nil {
+		t.Fatalf("live Nomad HCL parse failed: %v", err)
+	}
+
+	evalID, err := nomad.registerJob(context.Background(), parsed)
+	if err != nil {
+		t.Fatalf("live Nomad batch job registration failed: %v", err)
+	}
+
+	t.Logf("Live Nomad batch job submitted successfully! EvalID: %s", evalID)
+
+	// Clean up / purge test batch job
+	_ = nomad.stopJob(context.Background(), "adroit-build-bld-live-batch-001")
+}

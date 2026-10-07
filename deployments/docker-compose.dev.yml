@@ -111,23 +111,28 @@ services:
       - caddy_config:/config
 
   # ============================================================================
-  # Nomad (Cluster Workload Orchestration - Server Dev Mode)
+  # Nomad (Cluster Workload Orchestration - Server & Docker Client Dev Mode)
   # ============================================================================
   nomad:
     image: hashicorp/nomad:1.8
     container_name: adroit-nomad
     restart: unless-stopped
-    command: ["agent", "-server", "-bootstrap-expect=1", "-data-dir=/nomad/data", "-bind=0.0.0.0"]
+    command: ["agent", "-config=/etc/nomad.d/nomad.hcl"]
     environment:
       NOMAD_SKIP_DOCKER_IMAGE_WARN: "1"
+    privileged: true
+    cgroup: host
     ports:
       - "4646:4646" # HTTP API & Web UI
       - "4647:4647" # RPC
       - "4648:4648" # Serf WAN
     volumes:
       - nomad_data:/nomad/data
+      - ./nomad/nomad-dev.hcl:/etc/nomad.d/nomad.hcl:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
     healthcheck:
-      test: ["CMD", "nomad", "status"]
+      test: ["CMD", "nomad", "node", "status"]
       interval: 5s
       timeout: 3s
       retries: 5
@@ -143,6 +148,21 @@ services:
       - "1025:1025" # SMTP port
       - "8025:8025" # Webmail UI
 
+  # ============================================================================
+  # BuildKit (Container Build Engine Daemon)
+  # ============================================================================
+  buildkit:
+    image: moby/buildkit:v0.12.5
+    container_name: adroit-buildkit
+    restart: unless-stopped
+    privileged: true
+    command: ["--addr", "tcp://0.0.0.0:1234", "--addr", "unix:///run/buildkit/buildkitd.sock"]
+    ports:
+      - "1234:1234"
+    volumes:
+      - buildkit_data:/var/lib/buildkit
+      - /var/run/docker.sock:/var/run/docker.sock
+
 volumes:
   postgres_data:
   redis_data:
@@ -150,3 +170,4 @@ volumes:
   caddy_data:
   caddy_config:
   nomad_data:
+  buildkit_data:

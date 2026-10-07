@@ -27,9 +27,9 @@ func main() {
 	baseCfg := config.LoadBaseConfig(8086)
 	jwtSecret := config.GetEnv("JWT_SECRET", "super-secret-development-jwt-signing-key-change-in-production")
 	registryHost := config.GetEnv("REGISTRY_HOST", "registry.adroit.run")
-	nomadAddress := config.GetEnv("NOMAD_ADDR", "")
+	nomadAddress := config.GetEnv("NOMAD_ADDR", "http://localhost:4646")
 	nomadDatacenter := config.GetEnv("NOMAD_DATACENTER", "dc1")
-	runnerType := config.GetEnv("BUILD_RUNNER_TYPE", "local")
+	runnerType := config.GetEnv("BUILD_RUNNER_TYPE", "nomad")
 
 	log := logger.New(logger.Config{
 		Level:  baseCfg.LogLevel,
