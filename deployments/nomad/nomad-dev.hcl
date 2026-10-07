@@ -10,6 +10,9 @@ server {
 client {
   enabled           = true
   network_interface = "lo"
+  artifact {
+    disable_filesystem_isolation = true
+  }
 }
 
 plugin "docker" {
