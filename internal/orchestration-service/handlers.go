@@ -148,12 +148,19 @@ func (h *Handler) handleScaleService(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.svc.ScaleService(r.Context(), serviceID, req.Replicas); err != nil {
-		if errors.Is(err, ErrServiceNotFound) {
+	var scaleErr error
+	if req.MinReplicas != nil || req.MaxReplicas != nil || req.AutoScalingEnabled != nil {
+		scaleErr = h.svc.ScaleServiceWithOptions(r.Context(), serviceID, req)
+	} else {
+		scaleErr = h.svc.ScaleService(r.Context(), serviceID, req.Replicas)
+	}
+
+	if scaleErr != nil {
+		if errors.Is(scaleErr, ErrServiceNotFound) {
 			response.NotFound(w, "Service not found: "+serviceID)
 			return
 		}
-		response.InternalServerError(w, "Failed to scale service: "+err.Error())
+		response.InternalServerError(w, "Failed to scale service: "+scaleErr.Error())
 		return
 	}
 

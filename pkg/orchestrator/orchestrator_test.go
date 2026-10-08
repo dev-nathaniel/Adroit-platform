@@ -148,6 +148,38 @@ func TestGenerateJobSpec(t *testing.T) {
 			t.Errorf("expected non-secret env var in env block")
 		}
 	})
+
+	t.Run("Autoscaling_Policy_Job_Spec", func(t *testing.T) {
+		cfg := JobConfig{
+			DeploymentID:        "dep-auto-1",
+			ServiceID:           "svc-auto-99",
+			ServiceName:         "Auto App",
+			ServiceSlug:         "auto-app",
+			ImageTag:            "registry.adroit.run/acme/auto:v1",
+			Port:                8080,
+			Replicas:            1,
+			MinReplicas:         1,
+			MaxReplicas:         5,
+			AutoScalingEnabled:  true,
+			TargetCPUPercent:    75,
+			Strategy:            types.RolloutStrategyRolling,
+		}
+
+		spec, err := GenerateJobSpec(cfg)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if !strings.Contains(spec, `scaling {`) {
+			t.Errorf("expected scaling stanza in spec, got:\n%s", spec)
+		}
+		if !strings.Contains(spec, `min     = 1`) || !strings.Contains(spec, `max     = 5`) {
+			t.Errorf("expected min=1 and max=5 in scaling stanza, got:\n%s", spec)
+		}
+		if !strings.Contains(spec, `target = 75`) {
+			t.Errorf("expected target = 75 in scaling stanza, got:\n%s", spec)
+		}
+	})
 }
 
 func TestSimulatedDriver(t *testing.T) {

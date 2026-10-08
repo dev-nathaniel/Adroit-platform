@@ -273,6 +273,24 @@ func (m *mockRepository) UpdateServiceReplicas(ctx context.Context, serviceID st
 	}
 	s.MinReplicas = replicas
 	s.MaxReplicas = replicas
+	s.CurrentReplicas = replicas
+	m.services[serviceID] = s
+	return nil
+}
+
+func (m *mockRepository) UpdateServiceElasticReplicas(ctx context.Context, serviceID string, minReplicas, maxReplicas, currentReplicas int, autoScaling *bool) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	s, ok := m.services[serviceID]
+	if !ok {
+		return ErrServiceNotFound
+	}
+	s.MinReplicas = minReplicas
+	s.MaxReplicas = maxReplicas
+	s.CurrentReplicas = currentReplicas
+	if autoScaling != nil {
+		s.AutoScalingEnabled = *autoScaling
+	}
 	m.services[serviceID] = s
 	return nil
 }

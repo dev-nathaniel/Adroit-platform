@@ -44,6 +44,7 @@ type Repository interface {
 	GetDeploymentEnvSnapshot(ctx context.Context, deploymentID string) (*types.DeploymentEnvSnapshot, error)
 	UpdateServiceActiveDeployment(ctx context.Context, serviceID, deploymentID string) error
 	UpdateServiceReplicas(ctx context.Context, serviceID string, replicas int) error
+	UpdateServiceElasticReplicas(ctx context.Context, serviceID string, minReplicas, maxReplicas, currentReplicas int, autoScaling *bool) error
 	MarkPreviousDeploymentsReplaced(ctx context.Context, serviceID, currentDeploymentID string) error
 }
 
@@ -774,10 +775,23 @@ func (r *PostgresRepository) UpdateServiceActiveDeployment(ctx context.Context, 
 	return err
 }
 
-// UpdateServiceReplicas modifies the configured min and max replicas on a service
+// UpdateServiceReplicas modifies the configured min, max, and current replicas on a service
 func (r *PostgresRepository) UpdateServiceReplicas(ctx context.Context, serviceID string, replicas int) error {
-	query := `UPDATE services SET min_replicas = $2, max_replicas = $2, updated_at = $3 WHERE id = $1`
+	query := `UPDATE services SET min_replicas = $2, max_replicas = $2, current_replicas = $2, updated_at = $3 WHERE id = $1`
 	_, err := r.db.ExecContext(ctx, query, serviceID, replicas, time.Now().UTC())
+	return err
+}
+
+// UpdateServiceElasticReplicas modifies elasticity range and current replica count
+func (r *PostgresRepository) UpdateServiceElasticReplicas(ctx context.Context, serviceID string, minReplicas, maxReplicas, currentReplicas int, autoScaling *bool) error {
+	now := time.Now().UTC()
+	if autoScaling != nil {
+		query := `UPDATE services SET min_replicas = $2, max_replicas = $3, current_replicas = $4, auto_scaling_enabled = $5, updated_at = $6 WHERE id = $1`
+		_, err := r.db.ExecContext(ctx, query, serviceID, minReplicas, maxReplicas, currentReplicas, *autoScaling, now)
+		return err
+	}
+	query := `UPDATE services SET min_replicas = $2, max_replicas = $3, current_replicas = $4, updated_at = $5 WHERE id = $1`
+	_, err := r.db.ExecContext(ctx, query, serviceID, minReplicas, maxReplicas, currentReplicas, now)
 	return err
 }
 

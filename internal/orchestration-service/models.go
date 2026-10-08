@@ -14,7 +14,10 @@ type TriggerDeployRequest struct {
 
 // ScaleServiceRequest payload for scaling service task group replicas
 type ScaleServiceRequest struct {
-	Replicas int `json:"replicas"`
+	Replicas           int   `json:"replicas"`
+	MinReplicas        *int  `json:"min_replicas,omitempty"`
+	MaxReplicas        *int  `json:"max_replicas,omitempty"`
+	AutoScalingEnabled *bool `json:"auto_scaling_enabled,omitempty"`
 }
 
 // PromoteDeploymentRequest payload for manual canary promotion

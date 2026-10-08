@@ -19,8 +19,13 @@ type JobConfig struct {
 	ProjectSlug  string
 	ImageTag     string
 	Port         int
-	Replicas     int
-	Resources    types.ResourceLimits
+	Replicas            int
+	MinReplicas         int
+	MaxReplicas         int
+	AutoScalingEnabled  bool
+	TargetCPUPercent    int
+	TargetMemoryPercent int
+	Resources           types.ResourceLimits
 	HealthCheck     types.HealthCheckConfig
 	EnvVars         map[string]string
 	VaultSecretPath string
@@ -172,6 +177,43 @@ EOH
 `, vaultPath)
 	}
 
+	// Optional Nomad scaling stanza for dynamic autoscaling
+	var scalingStanza string
+	if cfg.AutoScalingEnabled || (cfg.MaxReplicas > cfg.MinReplicas && cfg.MaxReplicas > 1) {
+		min := cfg.MinReplicas
+		if min < 1 {
+			min = 1
+		}
+		max := cfg.MaxReplicas
+		if max < min {
+			max = min
+		}
+		targetCPU := cfg.TargetCPUPercent
+		if targetCPU <= 0 {
+			targetCPU = 80
+		}
+		scalingStanza = fmt.Sprintf(`
+    scaling {
+      enabled = true
+      min     = %d
+      max     = %d
+
+      policy {
+        cooldown            = "30s"
+        evaluation_interval = "15s"
+
+        check "cpu_utilization" {
+          source = "nomad-apm"
+          query  = "percentage-allocated-cpu"
+          strategy "target-value" {
+            target = %d
+          }
+        }
+      }
+    }
+`, min, max, targetCPU)
+	}
+
 	// Build full HCL spec
 	hcl := fmt.Sprintf(`# ==============================================================================
 # Adroit Platform — Production Workload Job Specification (Nomad)
@@ -195,7 +237,7 @@ job %q {
 
   group "app" {
     count = %d
-
+%s
     restart {
       attempts = 3
       interval = "2m"
@@ -257,6 +299,7 @@ job %q {
 		cfg.ServiceID, cfg.DeploymentID, strategy, cfg.RuntimeTier,
 		updateStanza,
 		replicas,
+		scalingStanza,
 		port,
 		serviceName,
 		cfg.ServiceID,

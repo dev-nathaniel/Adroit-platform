@@ -239,6 +239,11 @@ func (s *Service) HandleDeployRequested(ctx context.Context, payload events.Depl
 		ImageTag:        payload.ImageTag,
 		Port:            payload.Port,
 		Replicas:        replicas,
+		MinReplicas:     svc.MinReplicas,
+		MaxReplicas:     svc.MaxReplicas,
+		AutoScalingEnabled: svc.AutoScalingEnabled,
+		TargetCPUPercent: svc.TargetCPUPercent,
+		TargetMemoryPercent: svc.TargetMemoryPercent,
 		Resources:       payload.Resources,
 		HealthCheck:     payload.HealthCheck,
 		EnvVars:         nonSecretVars,
@@ -654,6 +659,50 @@ func (s *Service) ScaleService(ctx context.Context, serviceID string, replicas i
 	}
 
 	s.logger.Info("Scaled service replicas successfully", slog.String("service_id", serviceID), slog.Int("replicas", replicas), slog.String("name", svc.Name))
+	return nil
+}
+
+// ScaleServiceWithOptions scales instance replica count and optionally updates elastic range [min, max]
+func (s *Service) ScaleServiceWithOptions(ctx context.Context, serviceID string, req ScaleServiceRequest) error {
+	if req.Replicas <= 0 {
+		return fmt.Errorf("replica count must be at least 1")
+	}
+
+	svc, err := s.repo.GetService(ctx, serviceID)
+	if err != nil {
+		return err
+	}
+
+	minReplicas := svc.MinReplicas
+	if req.MinReplicas != nil {
+		minReplicas = *req.MinReplicas
+	}
+	maxReplicas := svc.MaxReplicas
+	if req.MaxReplicas != nil {
+		maxReplicas = *req.MaxReplicas
+	}
+	if maxReplicas < minReplicas {
+		maxReplicas = minReplicas
+	}
+
+	// Update DB with elastic bounds
+	if err := s.repo.UpdateServiceElasticReplicas(ctx, serviceID, minReplicas, maxReplicas, req.Replicas, req.AutoScalingEnabled); err != nil {
+		return err
+	}
+
+	// Scale active Nomad job if one exists
+	jobID := orchestrator.GenerateJobID(serviceID)
+	if err := s.driver.ScaleJob(ctx, jobID, req.Replicas); err != nil {
+		s.logger.Warn("Failed to scale active Nomad job (may not be running)", slog.String("job_id", jobID), slog.String("error", err.Error()))
+	}
+
+	s.logger.Info("Scaled service replicas successfully with options",
+		slog.String("service_id", serviceID),
+		slog.Int("replicas", req.Replicas),
+		slog.Int("min_replicas", minReplicas),
+		slog.Int("max_replicas", maxReplicas),
+		slog.String("name", svc.Name),
+	)
 	return nil
 }
 
