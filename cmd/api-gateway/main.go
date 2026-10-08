@@ -32,6 +32,7 @@ type DownstreamConfig struct {
 	OrchestrationServiceURL string
 	DNSServiceURL          string
 	LogServiceURL          string
+	RuntimeServiceURL      string
 }
 
 // SetupRouter creates and configures the Chi router, middleware chain, and service proxies.
@@ -168,6 +169,18 @@ func SetupRouter(log *slog.Logger, rl any, downstreams DownstreamConfig) *chi.Mu
 		}
 	}
 
+	if downstreams.RuntimeServiceURL != "" {
+		if runtimeProxy, err := apigateway.CreateServiceProxy("runtime-service", downstreams.RuntimeServiceURL, log); err == nil {
+			r.HandleFunc("/api/v1/services/{id}/autoscale", runtimeProxy.ServeHTTP)
+			r.HandleFunc("/api/v1/services/{id}/autoscale/*", runtimeProxy.ServeHTTP)
+			r.HandleFunc("/api/v1/services/{id}/metrics", runtimeProxy.ServeHTTP)
+			r.HandleFunc("/api/v1/services/{id}/metrics/*", runtimeProxy.ServeHTTP)
+			r.HandleFunc("/api/v1/services/{id}/scaling-events", runtimeProxy.ServeHTTP)
+			r.HandleFunc("/api/v1/services/{id}/trigger-scale", runtimeProxy.ServeHTTP)
+			log.Info("Mounted proxy for runtime-service", slog.String("target", downstreams.RuntimeServiceURL))
+		}
+	}
+
 	// 7. Custom 404 & 405 Handlers
 	r.NotFound(func(w http.ResponseWriter, r *http.Request) {
 		response.NotFound(w, fmt.Sprintf("Route %s %s not found", r.Method, r.URL.Path))
@@ -202,6 +215,7 @@ func main() {
 		OrchestrationServiceURL: config.GetEnv("ORCHESTRATION_SERVICE_URL", "http://localhost:8087"),
 		DNSServiceURL:          config.GetEnv("DNS_SERVICE_URL", "http://localhost:8088"),
 		LogServiceURL:          config.GetEnv("LOG_SERVICE_URL", "http://localhost:8089"),
+		RuntimeServiceURL:      config.GetEnv("RUNTIME_SERVICE_URL", "http://localhost:8090"),
 	}
 
 	// 2. Initialize structured logger
@@ -228,6 +242,7 @@ func main() {
 		slog.String("orchestration_service_url", downstreams.OrchestrationServiceURL),
 		slog.String("dns_service_url", downstreams.DNSServiceURL),
 		slog.String("log_service_url", downstreams.LogServiceURL),
+		slog.String("runtime_service_url", downstreams.RuntimeServiceURL),
 	)
 
 	// 3. Initialize Distributed / Tier Rate Limiter

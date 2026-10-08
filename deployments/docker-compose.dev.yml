@@ -163,6 +163,41 @@ services:
       - buildkit_data:/var/lib/buildkit
       - /var/run/docker.sock:/var/run/docker.sock
 
+  # ============================================================================
+  # Prometheus (Metrics Aggregation & Telemetry Time-Series)
+  # ============================================================================
+  prometheus:
+    image: prom/prometheus:v2.51.0
+    container_name: adroit-prometheus
+    restart: unless-stopped
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    depends_on:
+      nomad:
+        condition: service_healthy
+
+  # ============================================================================
+  # Nomad Autoscaler (Cluster & Workload Elastic Autoscaler Daemon)
+  # ============================================================================
+  nomad-autoscaler:
+    image: hashicorp/nomad-autoscaler:0.4
+    container_name: adroit-nomad-autoscaler
+    restart: unless-stopped
+    command: ["agent", "-config=/etc/nomad-autoscaler.d/autoscaler.hcl"]
+    ports:
+      - "8095:8080" # Autoscaler HTTP API
+    volumes:
+      - ./nomad/autoscaler.hcl:/etc/nomad-autoscaler.d/autoscaler.hcl:ro
+    depends_on:
+      nomad:
+        condition: service_healthy
+
 volumes:
   postgres_data:
   redis_data:
@@ -171,3 +206,4 @@ volumes:
   caddy_config:
   nomad_data:
   buildkit_data:
+  prometheus_data:

@@ -108,6 +108,13 @@ func main() {
 			Color: colorMagenta,
 		},
 		{
+			Name:  "Runtime Svc",
+			Pkg:   "./cmd/runtime-service",
+			Bin:   "runtime-service",
+			Port:  8090,
+			Color: colorYellow,
+		},
+		{
 			Name:  "API Gateway",
 			Pkg:   "./cmd/api-gateway",
 			Bin:   "api-gateway",

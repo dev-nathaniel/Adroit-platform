@@ -175,15 +175,64 @@ type Service struct {
 	BuildCommand   string            `json:"build_command,omitempty"`
 	StartCommand   string            `json:"start_command,omitempty"`
 	DockerfilePath string            `json:"dockerfile_path,omitempty"`
-	Port           int               `json:"port"`
-	MinReplicas    int               `json:"min_replicas"`
-	MaxReplicas    int               `json:"max_replicas"`
-	Resources      ResourceLimits    `json:"resources"`
-	HealthCheck        HealthCheckConfig `json:"health_check"`
-	WebhookSecret      string            `json:"webhook_secret,omitempty"`
-	ActiveDeploymentID *string           `json:"active_deployment_id,omitempty"`
-	CreatedAt          time.Time         `json:"created_at"`
-	UpdatedAt          time.Time         `json:"updated_at"`
+	Port                     int               `json:"port"`
+	MinReplicas              int               `json:"min_replicas"`
+	MaxReplicas              int               `json:"max_replicas"`
+	CurrentReplicas          int               `json:"current_replicas"`
+	AutoScalingEnabled       bool              `json:"auto_scaling_enabled"`
+	TargetCPUPercent         int               `json:"target_cpu_percent,omitempty"`
+	TargetMemoryPercent      int               `json:"target_memory_percent,omitempty"`
+	TargetRPS                int               `json:"target_rps,omitempty"`
+	ScaleUpCooldownSeconds   int               `json:"scale_up_cooldown_seconds,omitempty"`
+	ScaleDownCooldownSeconds int               `json:"scale_down_cooldown_seconds,omitempty"`
+	LastScaledAt             *time.Time        `json:"last_scaled_at,omitempty"`
+	Resources                ResourceLimits    `json:"resources"`
+	HealthCheck              HealthCheckConfig `json:"health_check"`
+	WebhookSecret            string            `json:"webhook_secret,omitempty"`
+	ActiveDeploymentID       *string           `json:"active_deployment_id,omitempty"`
+	CreatedAt                time.Time         `json:"created_at"`
+	UpdatedAt                time.Time         `json:"updated_at"`
+}
+
+// ServiceAutoScalingPolicy configures elastic bounds, targets, and stabilization cooldowns
+type ServiceAutoScalingPolicy struct {
+	ServiceID                string     `json:"service_id"`
+	AutoScalingEnabled       bool       `json:"auto_scaling_enabled"`
+	MinReplicas              int        `json:"min_replicas"`
+	MaxReplicas              int        `json:"max_replicas"`
+	TargetCPUPercent         int        `json:"target_cpu_percent"`
+	TargetMemoryPercent      int        `json:"target_memory_percent"`
+	TargetRPS                int        `json:"target_rps"`
+	ScaleUpCooldownSeconds   int        `json:"scale_up_cooldown_seconds"`
+	ScaleDownCooldownSeconds int        `json:"scale_down_cooldown_seconds"`
+	CurrentReplicas          int        `json:"current_replicas"`
+	LastScaledAt             *time.Time `json:"last_scaled_at,omitempty"`
+}
+
+// LiveServiceMetrics contains real-time sampled workload consumption
+type LiveServiceMetrics struct {
+	ServiceID         string    `json:"service_id"`
+	CPUPercent        float64   `json:"cpu_percent"`
+	MemoryUsageMB     float64   `json:"memory_usage_mb"`
+	MemoryLimitMB     float64   `json:"memory_limit_mb"`
+	MemoryPercent     float64   `json:"memory_percent"`
+	RequestsPerSec    float64   `json:"requests_per_sec"`
+	ActiveAllocations int       `json:"active_allocations"`
+	SampledAt         time.Time `json:"sampled_at"`
+}
+
+// ScalingEvent represents an audit log entry of an elastic scaling action
+type ScalingEvent struct {
+	ID               string    `json:"id"`
+	ServiceID        string    `json:"service_id"`
+	PreviousReplicas int       `json:"previous_replicas"`
+	DesiredReplicas  int       `json:"desired_replicas"`
+	Reason           string    `json:"reason"`
+	TriggerMetric    string    `json:"trigger_metric"` // "cpu", "memory", "rps", "manual"
+	MetricValue      float64   `json:"metric_value"`
+	TargetValue      float64   `json:"target_value"`
+	Status           string    `json:"status"` // "applied", "failed", "cooldown_skipped"
+	CreatedAt        time.Time `json:"created_at"`
 }
 
 // EnvVarScope defines where an environment variable should be made available

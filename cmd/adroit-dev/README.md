@@ -33,7 +33,15 @@ The **Adroit Process Supervisor** is a cross-platform (Windows, macOS, Linux) lo
 | :--- | :--- | :--- | :--- |
 | **Auth Service** | `./cmd/auth-service` | `8081` | Real standalone auth service process |
 | **User Service** | `./cmd/user-service` | `8082` | Real standalone user & workspace service process |
-| **API Gateway** | `./cmd/api-gateway` | `8080` | Real standalone reverse proxy & ingress process |
+| **Notification Svc** | `./cmd/notification-service` | `8083` | Email, webhooks, and transactional alert notifications |
+| **Project Service** | `./cmd/project-service` | `8084` | Projects, environments, service definitions, secrets |
+| **Git Svc** | `./cmd/git-integration-service` | `8085` | GitHub/GitLab webhook processing & repo integration |
+| **Build Service** | `./cmd/build-service` | `8086` | BuildKit compilation triggers and log streaming |
+| **Orchestration Svc** | `./cmd/orchestration-service` | `8087` | Nomad workload deployment, rollouts, allocations |
+| **DNS & Ingress** | `./cmd/dns-service` | `8088` | Custom domains, ACME challenges, Caddy dynamic routes |
+| **Log Service** | `./cmd/log-service` | `8089` | Real-time container log aggregation & WebSocket/SSE streaming |
+| **Runtime Svc** | `./cmd/runtime-service` | `8090` | Elastic auto-scaling controller, live metrics & telemetry |
+| **API Gateway** | `./cmd/api-gateway` | `8080` | Central ingress reverse proxy, JWT auth, rate limiting |
 
 ---
 

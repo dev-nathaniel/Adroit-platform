@@ -1,0 +1,22 @@
+# ==============================================================================
+# Adroit Platform — Prometheus Scrape Configuration
+# ==============================================================================
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  # Nomad Cluster and Container Workload Telemetry
+  - job_name: "nomad"
+    metrics_path: "/v1/metrics"
+    params:
+      format: ["prometheus"]
+    static_configs:
+      - targets: ["adroit-nomad:4646"]
+
+  # Edge Routing & Traffic Metrics (Caddy)
+  - job_name: "caddy"
+    metrics_path: "/metrics"
+    static_configs:
+      - targets: ["adroit-caddy:2019"]
