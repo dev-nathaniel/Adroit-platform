@@ -498,8 +498,9 @@ def test_dynamic_scaling(token, org_id):
             req = urllib.request.Request(f"http://localhost:4646/v1/job/{nomad_job_id}/deployments")
             with urllib.request.urlopen(req, timeout=5) as nresp:
                 deps = json.loads(nresp.read().decode("utf-8"))
-                if deps and deps[0].get("Status") == "successful":
-                    log_success(f"Nomad scale-up deployment finalized (ID: {deps[0]['ID'][:8]}, Status: {deps[0]['Status']})")
+                latest_dep = deps[-1] if deps else {}
+                if latest_dep.get("Status") == "successful":
+                    log_success(f"Nomad scale-up deployment finalized (ID: {latest_dep['ID'][:8]}, Status: {latest_dep['Status']})")
                     break
         except Exception:
             pass
