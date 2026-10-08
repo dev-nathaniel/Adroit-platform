@@ -320,34 +320,54 @@ func (c *NomadHTTPClient) PromoteCanary(ctx context.Context, jobID string) error
 	return nil
 }
 
-// ScaleJob modifies the replica count of the job's app group
+// ScaleJob modifies the replica count of the job's app group with active deployment retry tolerance
 func (c *NomadHTTPClient) ScaleJob(ctx context.Context, jobID string, count int) error {
 	scalePayload := map[string]any{
-		"Count":  count,
-		"Target": map[string]string{"Group": "app"},
+		"Count":            count,
+		"Target":           map[string]string{"Group": "app"},
+		"ErrorOnConflicts": false,
 	}
 	body, _ := json.Marshal(scalePayload)
 
-	req, err := c.newRequest(ctx, http.MethodPost, fmt.Sprintf("/v1/job/%s/scale", jobID), bytes.NewReader(body))
-	if err != nil {
-		return err
-	}
+	maxAttempts := 15
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		req, err := c.newRequest(ctx, http.MethodPost, fmt.Sprintf("/v1/job/%s/scale", jobID), bytes.NewReader(body))
+		if err != nil {
+			return err
+		}
 
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("%w: %v", ErrDriverUnavailable, err)
-	}
-	defer resp.Body.Close()
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			return fmt.Errorf("%w: %v", ErrDriverUnavailable, err)
+		}
 
-	if resp.StatusCode == http.StatusNotFound {
-		return ErrJobNotFound
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		if resp.StatusCode == http.StatusNotFound {
+			resp.Body.Close()
+			return ErrJobNotFound
+		}
+
+		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+			resp.Body.Close()
+			return nil
+		}
+
 		b, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+
+		// If blocked by an active deployment (e.g. prior rollout undergoing min_healthy_time), wait and retry
+		if resp.StatusCode == http.StatusBadRequest && strings.Contains(string(b), "active deployment") {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(1 * time.Second):
+				continue
+			}
+		}
+
 		return fmt.Errorf("nomad scale error (%d): %s", resp.StatusCode, string(b))
 	}
 
-	return nil
+	return fmt.Errorf("nomad scale error: timed out waiting for active deployment to complete")
 }
 
 // StopJob deregisters or stops a Nomad job
