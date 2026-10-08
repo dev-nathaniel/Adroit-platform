@@ -42,6 +42,8 @@ const (
 	SubjectServiceDeleted        = "adroit.service.deleted"
 	SubjectServiceMoved          = "adroit.service.moved"
 	SubjectServiceScaleRequested = "adroit.service.scale_requested"
+	SubjectServiceScaled        = "adroit.service.scaled"
+	SubjectServiceScaleFailed   = "adroit.service.scale_failed"
 	SubjectEnvVarsUpdated        = "adroit.env_vars.updated"
 
 	// Organization & User events
@@ -360,6 +362,18 @@ type EnvVarsUpdatedPayload struct {
 	UpdatedKeys    []string `json:"updated_keys"`
 	Action         string   `json:"action"` // "set", "delete"
 	TargetEnv      string   `json:"target_env,omitempty"`
+}
+
+// ServiceScaledPayload is emitted when an elastic or manual replica change occurs
+type ServiceScaledPayload struct {
+	ServiceID        string    `json:"service_id"`
+	PreviousReplicas int       `json:"previous_replicas"`
+	DesiredReplicas  int       `json:"desired_replicas"`
+	Reason           string    `json:"reason"`
+	TriggerMetric    string    `json:"trigger_metric"` // "cpu", "memory", "rps", "manual"
+	MetricValue      float64   `json:"metric_value"`
+	TargetValue      float64   `json:"target_value"`
+	ScaledAt         time.Time `json:"scaled_at"`
 }
 
 
