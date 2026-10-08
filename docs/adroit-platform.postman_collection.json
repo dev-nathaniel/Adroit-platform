@@ -75,6 +75,11 @@
 			"key": "adroitTier",
 			"value": "pro",
 			"type": "string"
+		},
+		{
+			"key": "runtimeUrl",
+			"value": "http://localhost:8090",
+			"type": "string"
 		}
 	],
 	"item": [
@@ -2698,7 +2703,7 @@
 						],
 						"body": {
 							"mode": "raw",
-							"raw": "{\n  \"replicas\": 4\n}"
+							"raw": "{\n  \"replicas\": 3,\n  \"min_replicas\": 2,\n  \"max_replicas\": 6,\n  \"auto_scaling_enabled\": true\n}"
 						},
 						"url": {
 							"raw": "{{baseUrl}}/api/v1/services/{{serviceId}}/scale",
@@ -2713,7 +2718,7 @@
 								"scale"
 							]
 						},
-						"description": "Dynamically scales the active replica count for a service on Nomad and updates database configuration."
+						"description": "Dynamically scales the active replica count on Nomad and updates database configuration. Supports elastic ranges (min_replicas, max_replicas, auto_scaling_enabled) or fixed replica pinning."
 					},
 					"response": []
 				},
@@ -3378,6 +3383,340 @@
 							]
 						},
 						"description": "Permanently purges logs older than the specified RFC3339 timestamp."
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "10. Runtime & Auto-Scaling Service",
+			"item": [
+				{
+					"name": "Configure Auto-Scaling Policy",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"pm.test(\"Policy enabled\", function () {",
+									"    var res = pm.response.json();",
+									"    pm.expect(res.data.auto_scaling_enabled).to.be.true;",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"auto_scaling_enabled\": true,\n  \"min_replicas\": 1,\n  \"max_replicas\": 5,\n  \"target_cpu_percent\": 70,\n  \"target_memory_percent\": 80,\n  \"target_rps\": 500,\n  \"scale_up_cooldown_seconds\": 30,\n  \"scale_down_cooldown_seconds\": 180\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/services/{{serviceId}}/autoscale",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"services",
+								"{{serviceId}}",
+								"autoscale"
+							]
+						},
+						"description": "Configures autonomous horizontal auto-scaling thresholds, replica boundaries, and stabilization cooldown windows for a service."
+					},
+					"response": []
+				},
+				{
+					"name": "Get Auto-Scaling Policy",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/services/{{serviceId}}/autoscale",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"services",
+								"{{serviceId}}",
+								"autoscale"
+							]
+						},
+						"description": "Retrieves the configured horizontal auto-scaling policy, target metric thresholds, and cooldown durations for a service."
+					},
+					"response": []
+				},
+				{
+					"name": "Get Live Workload Metrics",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"pm.test(\"Metrics payload present\", function () {",
+									"    var res = pm.response.json();",
+									"    pm.expect(res.data.metrics).to.be.an(\"object\");",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/services/{{serviceId}}/metrics",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"services",
+								"{{serviceId}}",
+								"metrics"
+							]
+						},
+						"description": "Samples real-time CPU utilization, memory consumption, RPS, and active allocations aggregated from Prometheus and Nomad cluster state."
+					},
+					"response": []
+				},
+				{
+					"name": "Get Metrics Time-Series History",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/services/{{serviceId}}/metrics/history?duration=1h&limit=100",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"services",
+								"{{serviceId}}",
+								"metrics",
+								"history"
+							],
+							"query": [
+								{
+									"key": "duration",
+									"value": "1h"
+								},
+								{
+									"key": "limit",
+									"value": "100"
+								}
+							]
+						},
+						"description": "Retrieves historical time-series samples of workload telemetry metrics for dashboard visualization and trend analysis."
+					},
+					"response": []
+				},
+				{
+					"name": "List Scaling Audit Events",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/services/{{serviceId}}/scaling-events?limit=50",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"services",
+								"{{serviceId}}",
+								"scaling-events"
+							],
+							"query": [
+								{
+									"key": "limit",
+									"value": "50"
+								}
+							]
+						},
+						"description": "Retrieves the immutable audit log of auto-scaling decisions, triggers, previous/desired replica counts, and status."
+					},
+					"response": []
+				},
+				{
+					"name": "Trigger Manual Scale Action",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"desired_replicas\": 3,\n  \"reason\": \"Manual scale adjustment for promotion event\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/services/{{serviceId}}/trigger-scale",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"services",
+								"{{serviceId}}",
+								"trigger-scale"
+							]
+						},
+						"description": "Manually triggers an audited scaling action through the runtime reconciliation controller."
+					},
+					"response": []
+				},
+				{
+					"name": "Simulate Workload Metrics (Dev/Testing)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"cpu_percent\": 95.0,\n  \"memory_mb\": 220.0,\n  \"rps\": 650.0,\n  \"duration_seconds\": 60\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/services/{{serviceId}}/metrics/simulate",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"services",
+								"{{serviceId}}",
+								"metrics",
+								"simulate"
+							]
+						},
+						"description": "Overlays artificial metric spikes or drops on a service for testing auto-scaling reconciliation."
+					},
+					"response": []
+				},
+				{
+					"name": "Runtime Service Health Check",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{runtimeUrl}}/healthz",
+							"host": [
+								"{{runtimeUrl}}"
+							],
+							"path": [
+								"healthz"
+							]
+						},
+						"description": "Direct liveness probe for the Adroit Runtime & Auto-Scaling Service daemon."
 					},
 					"response": []
 				}

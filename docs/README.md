@@ -111,7 +111,15 @@ All routes are dispatched through the API Gateway at `http://localhost:8080`:
   - `POST /api/v1/deployments/:id/promote` (Promote canary rollout)
   - `POST /api/v1/deployments/:id/rollback` (Roll back to previous release)
   - `POST /api/v1/deployments/:id/cancel` (Abort active rollout)
-  - `POST /api/v1/services/:id/scale` (Dynamically scale replicas)
+  - `POST /api/v1/services/:id/scale` (Dynamically scale replicas with optional elastic bounds: `min_replicas`, `max_replicas`, `auto_scaling_enabled`)
+* **Auto-Scaling & Runtime Monitoring:**
+  - `GET /api/v1/services/:id/autoscale` (Fetch configured horizontal auto-scaling policy & thresholds)
+  - `PUT /api/v1/services/:id/autoscale` (Configure auto-scaling policy: CPU/memory/RPS targets, min/max bounds, cooldown windows)
+  - `GET /api/v1/services/:id/metrics` (Live CPU, memory, RPS, and active allocations aggregated from Prometheus and Nomad)
+  - `GET /api/v1/services/:id/metrics/history` (Historical time-series metric samples for dashboard telemetry)
+  - `GET /api/v1/services/:id/scaling-events` (Audit log of automated and manual scaling actions)
+  - `POST /api/v1/services/:id/trigger-scale` (Manual scaling action executed with audit log tracking)
+  - `POST /api/v1/services/:id/metrics/simulate` (Inject metric telemetry overrides for test verification)
 * **Edge Ingress & Custom Domains:**
   - `GET /api/v1/domains` (List domains)
   - `POST /api/v1/domains` (Register custom domain)

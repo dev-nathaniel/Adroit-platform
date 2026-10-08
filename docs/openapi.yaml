@@ -71,6 +71,8 @@ servers:
     description: Ingress & DNS Service (Direct Microservice Port)
   - url: http://localhost:8089
     description: Application Log Streaming Service (Direct Microservice Port)
+  - url: http://localhost:8090
+    description: Runtime & Auto-Scaling Service (Direct Microservice Port)
 
 tags:
   - name: System & Gateway
@@ -2551,7 +2553,7 @@ paths:
       tags:
         - Deployments & Orchestration
       summary: Scale Service Replicas
-      description: Dynamically scales the active replica count for a service on Nomad.
+      description: Dynamically scales the active replica count for a service on Nomad, optionally setting variable elasticity bounds.
       security:
         - BearerAuth: []
       parameters:
@@ -2575,6 +2577,17 @@ paths:
                   type: integer
                   minimum: 1
                   example: 3
+                min_replicas:
+                  type: integer
+                  minimum: 1
+                  example: 1
+                max_replicas:
+                  type: integer
+                  minimum: 1
+                  example: 5
+                auto_scaling_enabled:
+                  type: boolean
+                  example: true
       responses:
         '200':
           description: Service scaling applied successfully
@@ -2588,6 +2601,157 @@ paths:
           $ref: '#/components/responses/UnauthorizedError'
         '404':
           $ref: '#/components/responses/NotFoundError'
+
+  /api/v1/services/{id}/autoscale:
+    get:
+      tags:
+        - Deployments & Orchestration
+      summary: Get Auto-Scaling Policy
+      description: Returns the configured elastic auto-scaling bounds, metric targets, and stabilization cooldowns.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Auto-scaling policy configuration
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+    post:
+      tags:
+        - Deployments & Orchestration
+      summary: Update Auto-Scaling Policy
+      description: Updates elasticity boundaries, target CPU/Memory/RPS thresholds, and cooldown windows.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                auto_scaling_enabled:
+                  type: boolean
+                min_replicas:
+                  type: integer
+                  minimum: 1
+                max_replicas:
+                  type: integer
+                  minimum: 1
+                target_cpu_percent:
+                  type: integer
+                  minimum: 1
+                  maximum: 100
+                target_memory_percent:
+                  type: integer
+                  minimum: 1
+                  maximum: 100
+                target_rps:
+                  type: integer
+                  minimum: 1
+                scale_up_cooldown_seconds:
+                  type: integer
+                scale_down_cooldown_seconds:
+                  type: integer
+      responses:
+        '200':
+          description: Policy updated successfully
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+
+  /api/v1/services/{id}/metrics:
+    get:
+      tags:
+        - Deployments & Orchestration
+      summary: Get Live Service Metrics
+      description: Returns real-time sampled CPU, Memory RSS, and RPS telemetry.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Live workload telemetry
+
+  /api/v1/services/{id}/metrics/history:
+    get:
+      tags:
+        - Deployments & Orchestration
+      summary: Get Service Metrics History
+      description: Returns chronological time-series metric samples for developer dashboard charts.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+      responses:
+        '200':
+          description: Time-series telemetry samples
+
+  /api/v1/services/{id}/scaling-events:
+    get:
+      tags:
+        - Deployments & Orchestration
+      summary: List Scaling History & Audit Events
+      description: Returns historical audit records of scaling events, triggers, and decisions.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Historical scaling events
+
+  /api/v1/services/{id}/trigger-scale:
+    post:
+      tags:
+        - Deployments & Orchestration
+      summary: Trigger Immediate Autoscaling Reconciliation
+      description: Forces an instant metric evaluation and scaling cycle.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Reconciliation decision applied
 
   /api/v1/deployments/{id}:
     get:

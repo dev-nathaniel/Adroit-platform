@@ -124,3 +124,37 @@ Hosts the API Gateway and the core platform microservices:
 2. **Asynchronous Orchestration:** Services publish domain events to **NATS JetStream** (`adroit.events.*`). Subscribed services process events with at-least-once delivery guarantees.
 3. **Internal Service Discovery & Mesh:** Services discover peers and establish mutual TLS via **Consul Connect Envoy** sidecars.
 4. **Secret Retrieval:** Services authenticate to **Vault** using Nomad workload identities to retrieve dynamic secrets and database credentials.
+
+---
+
+## 4. Elastic Workload Auto-Scaling & Metrics Pipeline Architecture
+
+```
+[Edge Routing (Caddy)]        [Nomad Task Allocations]
+        │                                │
+        ▼                                ▼
+[Prometheus Metrics Engine (/metrics & /v1/metrics)]
+        │
+        ▼ (Periodic Scrapes every 15s)
+[Runtime Service Reconciliation Loop] <───> [PostgreSQL: autoscale policies & history]
+        │
+        ├─────────────────────────────────────────────────┐
+        ▼                                                 ▼
+[Nomad API (/v1/job/:id/scale)]                [NATS JetStream ('adroit.service.scaled')]
+```
+
+### 4.1 Dual-Engine Autoscaling Philosophy
+1. **PaaS-Native Controller (`runtime-service` on port 8090)**:
+   - Manages tenant business logic, elastic boundaries `[min_replicas, max_replicas]`, billing plan tier caps, and scale-to-zero triggers.
+   - Evaluates multi-dimensional telemetry (CPU %, Memory %, RPS, active in-flight requests).
+   - Enforces stabilization windows (configurable scale-up and scale-down cooldowns) to eliminate workload flapping/oscillation.
+   - Writes immutable scaling audit logs (`service_scaling_events`) and emits CloudEvents across NATS JetStream (`adroit.service.scaled`).
+2. **Cluster-Native Nomad Autoscaler Daemon (`nomad-autoscaler`)**:
+   - Runs alongside Nomad server agents to provide infrastructure and job-group level elasticity.
+   - Evaluates HCL `scaling` stanzas generated in Nomad job specifications by `pkg/orchestrator/job_spec.go`.
+   - Consumes metrics from the built-in `nomad-apm` plugin and platform Prometheus.
+
+### 4.2 Metrics Pipeline Hierarchy
+* **Leading Indicators (Ingress / Edge Traffic):** Requests per second (RPS) and concurrent in-flight connections from Caddy. Triggers horizontal scale-up before application CPU saturates.
+* **Lagging Indicators (Compute Resources):** CPU utilization (`nomad_client_allocs_cpu_total_percent`) and memory RSS (`nomad_client_allocs_memory_rss`) from Nomad client telemetry. Protects against out-of-memory (OOM) process termination and thread starvation.
+* **Worker Queue Lag:** Unprocessed consumer message lag in NATS JetStream topics for asynchronous worker workloads.
