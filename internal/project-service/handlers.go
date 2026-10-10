@@ -29,7 +29,8 @@ func NewHandler(service *Service) *Handler {
 func (h *Handler) RegisterRoutes(r chi.Router, jwtSecret string) {
 	// Public / worker download endpoint for BuildKit container runner
 	r.Get("/services/{id}/source/download", h.HandleDownloadSource)
-	r.Get("/services/{id}/{filename}", h.HandleDownloadSource)
+	r.Get("/services/{id}/source.tar.gz", h.HandleDownloadSource)
+	r.Get("/services/{id}/source.zip", h.HandleDownloadSource)
 
 	r.Group(func(auth chi.Router) {
 		auth.Use(middleware.RequireAuth(jwtSecret))
